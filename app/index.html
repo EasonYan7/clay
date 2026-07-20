@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Clay</title>
+  <link rel="stylesheet" href="vendor/grapes.min.css">
+  <link rel="stylesheet" href="styles.css?v=16">
+</head>
+<body>
+  <div id="app">
+    <header id="topbar">
+      <button id="btn-home" class="brand" title="返回主页">
+        <span class="brand-logo"></span>
+        <span class="brand-name">Clay</span>
+      </button>
+
+      <div class="tb-divider"></div>
+
+      <div class="segmented" id="device-seg">
+        <button class="seg-item active" data-device="desktop" title="桌面"></button>
+        <button class="seg-item" data-device="tablet" title="平板"></button>
+        <button class="seg-item" data-device="mobile" title="手机"></button>
+      </div>
+
+      <div class="tb-group">
+        <button id="btn-undo" class="icon-btn" title="撤销  ⌘Z"></button>
+        <button id="btn-redo" class="icon-btn" title="重做  ⇧⌘Z"></button>
+      </div>
+
+      <div class="tb-group">
+        <button id="btn-preview" class="icon-btn" title="预览"></button>
+      </div>
+
+      <div class="tb-spacer"></div>
+
+      <button id="btn-theme" class="icon-btn" title="切换主题"></button>
+      <button id="btn-save" class="btn btn-primary" title="保存到源文件  ⌘S">
+        <span class="btn-ic"></span>保存<span id="save-dot" hidden></span>
+      </button>
+      <button id="btn-export-pdf" class="btn btn-soft" title="导出 PDF  ⌘P">
+        <span class="btn-ic"></span>PDF
+      </button>
+    </header>
+
+    <nav id="doctabs" hidden>
+      <div id="tabs-list"></div>
+      <button id="btn-newtab" class="tab-add" title="打开 HTML 文件  ⌘O"></button>
+    </nav>
+
+    <div id="workspace">
+      <aside id="sidebar">
+        <div id="selection-bar">
+          <span id="selection-name" class="muted">未选中元素</span>
+          <button id="btn-select-parent" class="ghost-btn" title="选中上一层容器" hidden>上一层</button>
+        </div>
+        <nav id="sidebar-tabs">
+          <button class="tab active" data-tab="style"><span class="tab-ic"></span>样式</button>
+          <button class="tab" data-tab="layers"><span class="tab-ic"></span>图层</button>
+          <button class="tab" data-tab="history"><span class="tab-ic"></span>历史</button>
+        </nav>
+        <div class="tab-pane active" id="pane-style">
+          <div id="style-hint" class="pane-hint">
+            <p>点击画布中的元素开始编辑。</p>
+            <ul class="hint-list">
+              <li>双击文字 — 直接改内容</li>
+              <li>双击图片 — 换一张图</li>
+              <li>按住元素拖动 — 挪到别处</li>
+            </ul>
+          </div>
+          <div id="apply-similar-bar" hidden>
+            <button id="btn-apply-similar" class="btn btn-soft btn-block"></button>
+            <div class="apply-hint">默认只改当前这一个,不影响长得一样的其它元素。</div>
+          </div>
+          <div id="el-info" hidden>
+            <div class="info-row"><span>尺寸</span><b id="info-size"></b></div>
+            <div class="info-row"><span>字号 / 粗细</span><b id="info-font"></b></div>
+            <div class="info-row"><span>文字色</span><b class="swatch-val"><i id="info-color-sw"></i><span id="info-color"></span></b></div>
+            <div class="info-row"><span>背景</span><b class="swatch-val"><i id="info-bg-sw"></i><span id="info-bg"></span></b></div>
+            <div class="info-row"><span>圆角</span><b id="info-radius"></b></div>
+          </div>
+          <div id="style-mount"></div>
+          <div id="selector-mount" hidden></div>
+          <div id="traits-mount" hidden></div>
+        </div>
+        <div class="tab-pane" id="pane-layers">
+          <div id="layers-mount"></div>
+        </div>
+        <div class="tab-pane" id="pane-history">
+          <div class="pane-hint" id="history-hint">
+            <p>你的每一步修改都记在这里。</p>
+            <ul class="hint-list">
+              <li>点任意一条 — 回到那个时刻</li>
+              <li>回去之后再改 — 之后的记录被替换</li>
+            </ul>
+          </div>
+          <div id="history-mount"></div>
+        </div>
+      </aside>
+
+      <div id="canvas-wrap">
+        <div id="canvas"></div>
+        <div id="empty-state">
+          <div class="empty-card">
+            <div class="empty-mark"></div>
+            <h1>把 AI 生成的页面<br>变成<em>可编辑的画布</em></h1>
+            <p>从 v0、Bolt、Lovable 复制 HTML 粘贴进来,<br>像用 Figma 一样调整它,再导出干净的代码。</p>
+
+            <div class="empty-actions">
+              <button class="btn btn-lg btn-sketch" id="btn-empty-import">
+                <span class="btn-ic"></span>打开 HTML 文件
+                <span class="btn-kbd">⌘O</span>
+              </button>
+            </div>
+            <button class="link-btn" id="btn-paste-code">或粘贴一段 HTML 代码</button>
+
+            <div class="empty-samples">
+              <span class="samples-label">或者先玩玩示例</span>
+              <div class="sample-cards">
+                <button class="sample-card" data-sample="tailwind">
+                  <span class="sc-thumb sc-dark"><i></i></span>
+                  <span class="sc-body">
+                    <span class="sc-name">v0 风格落地页</span>
+                    <span class="sc-meta">Tailwind · 深色</span>
+                  </span>
+                </button>
+                <button class="sample-card" data-sample="plaincss">
+                  <span class="sc-thumb sc-light"><i></i></span>
+                  <span class="sc-body">
+                    <span class="sc-name">Bolt 风格官网</span>
+                    <span class="sc-meta">原生 CSS · 浅色</span>
+                  </span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 导入 -->
+  <div class="modal-backdrop" id="import-modal" hidden>
+    <div class="modal">
+      <div class="modal-head">
+        <h3>导入页面</h3>
+        <button class="icon-btn modal-x" data-close></button>
+      </div>
+      <p class="modal-sub">把 AI 工具生成的 HTML 代码整段粘贴到下面。若本地已有文件,用「打开 HTML 文件」更方便。</p>
+      <textarea id="import-textarea" placeholder="<!DOCTYPE html> …" spellcheck="false"></textarea>
+      <div class="modal-foot">
+        <button id="btn-open-file" class="btn btn-soft"><span class="btn-ic"></span>改用打开文件…</button>
+        <span class="modal-note" id="import-note"></span>
+        <div class="modal-actions">
+          <button class="btn btn-soft" data-close>取消</button>
+          <button id="btn-do-import" class="btn btn-primary">导入</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 手绘标注层:必须覆盖整个窗口才够得到顶部工具栏(画布容器在工具栏下方) -->
+  <svg id="sketch-layer" aria-hidden="true" hidden></svg>
+
+  <div id="toast" hidden></div>
+
+  <script src="vendor/grapes.min.js"></script>
+  <script src="icons.js?v=16"></script>
+  <script src="samples.js?v=16"></script>
+  <script src="importer.js?v=16"></script>
+  <script src="exporter.js?v=16"></script>
+  <script src="app.js?v=16"></script>
+</body>
+</html>

@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8">
+  <title>Clay 实验台 — GrapesJS 消化 AI HTML 测试</title>
+  <link rel="stylesheet" href="https://unpkg.com/grapesjs@0.22.12/dist/css/grapes.min.css">
+  <script src="https://unpkg.com/grapesjs@0.22.12/dist/grapes.min.js"></script>
+  <style>
+    body { margin: 0; font-family: -apple-system, sans-serif; }
+    #toolbar {
+      display: flex; gap: 8px; align-items: center;
+      padding: 8px 12px; background: #1a1a2e; color: #eee;
+    }
+    #toolbar button {
+      padding: 6px 14px; border: 1px solid #555; border-radius: 6px;
+      background: #2d2d44; color: #eee; cursor: pointer; font-size: 13px;
+    }
+    #toolbar button:hover { background: #3d3d5c; }
+    #toolbar .title { font-weight: 600; margin-right: 12px; }
+    #gjs { height: calc(100vh - 46px); }
+    #export-modal {
+      display: none; position: fixed; inset: 5% 10%; z-index: 999;
+      background: #16161e; color: #d4d4d4; border-radius: 10px;
+      padding: 16px; overflow: auto; box-shadow: 0 20px 60px rgba(0,0,0,.6);
+    }
+    #export-modal pre { white-space: pre-wrap; font-size: 12px; }
+    #export-modal h3 { margin: 8px 0; color: #7dd3fc; }
+  </style>
+</head>
+<body>
+  <div id="toolbar">
+    <span class="title">Clay 实验台</span>
+    <button onclick="loadSample('tailwind')">载入样本 A:v0 风格 (Tailwind)</button>
+    <button onclick="loadSample('plaincss')">载入样本 B:Bolt 风格 (内嵌 CSS)</button>
+    <button onclick="exportCode()">导出代码</button>
+    <button onclick="document.getElementById('export-modal').style.display='none'">关闭导出</button>
+  </div>
+  <div id="gjs"></div>
+  <div id="export-modal">
+    <h3>导出 HTML</h3><pre id="export-html"></pre>
+    <h3>导出 CSS</h3><pre id="export-css"></pre>
+  </div>
+
+  <script>
+    const editor = grapesjs.init({
+      container: '#gjs',
+      height: 'calc(100vh - 46px)',
+      fromElement: false,
+      storageManager: false,
+      canvas: {
+        // 让 Tailwind 工具类在画布内真实渲染(模拟 v0 输出的运行环境)
+        scripts: ['https://cdn.tailwindcss.com'],
+      },
+    });
+
+    async function loadSample(name) {
+      const raw = await fetch('samples/' + name + '.html').then(r => r.text());
+      // 拆出 <style>,其余喂给组件树;丢弃 <script>
+      const styles = [...raw.matchAll(/<style[^>]*>([\s\S]*?)<\/style>/gi)]
+        .map(m => m[1]).join('\n');
+      const body = raw
+        .replace(/<style[\s\S]*?<\/style>/gi, '')
+        .replace(/<script[\s\S]*?<\/script>/gi, '')
+        .replace(/^[\s\S]*?<body[^>]*>/i, '')
+        .replace(/<\/body>[\s\S]*$/i, '');
+      editor.setComponents(body);
+      editor.setStyle(styles);
+    }
+
+    function exportCode() {
+      document.getElementById('export-html').textContent = editor.getHtml();
+      document.getElementById('export-css').textContent = editor.getCss();
+      document.getElementById('export-modal').style.display = 'block';
+    }
+
+    loadSample('tailwind');
+  </script>
+</body>
+</html>
