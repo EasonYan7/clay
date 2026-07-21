@@ -1,10 +1,14 @@
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 contextBridge.exposeInMainWorld('clay', {
   saveFile: (defaultName, content, sourcePath) =>
     ipcRenderer.invoke('clay:save-file', defaultName, content, sourcePath),
+  // 从桌面拖文件进窗口:拖来的 File 对象本身不带磁盘路径(渲染进程沙箱化后
+  // File.path 已经拿不到了),要用主进程这边的 webUtils 才能换出真实路径。
+  getPathForFile: (file) => webUtils.getPathForFile(file),
   writeFile: (filePath, content) => ipcRenderer.invoke('clay:write-file', filePath, content),
-  exportPdf: (defaultName, content) => ipcRenderer.invoke('clay:export-pdf', defaultName, content),
+  exportPdf: (defaultName, content, width, sourcePath) =>
+    ipcRenderer.invoke('clay:export-pdf', defaultName, content, width, sourcePath),
   openFile: () => ipcRenderer.invoke('clay:open-file'),
   filterExisting: (paths) => ipcRenderer.invoke('clay:filter-existing', paths),
   readPath: (filePath) => ipcRenderer.invoke('clay:read-path', filePath),

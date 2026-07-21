@@ -141,6 +141,14 @@ ipcMain.handle('clay:write-file', async (_e, filePath, content) => {
   }
 });
 
+// 把 <base href="file://原目录/"> 插到 <head> 最前面,让相对路径按原文件的位置解析
+// (逻辑和 renderer/app.js 的 applyCanvasBase 对齐:每段路径单独编码,斜杠保留)
+function injectBaseTag(html, sourcePath) {
+  const dir = sourcePath.slice(0, sourcePath.lastIndexOf('/') + 1);
+  const href = 'file://' + dir.split('/').map(encodeURIComponent).join('/');
+  return html.replace(/<head(\s[^>]*)?>/i, (m) => m + '<base href="' + href + '">');
+}
+
 /* 导出 PDF —— 追求"最忠实展示"的整页长图,像素级还原用户在屏幕上看到的样子。
  *
  * 为什么不用 printToPDF 直出:实测有两个坑,都会毁掉展示效果——
@@ -150,7 +158,10 @@ ipcMain.handle('clay:write-file', async (_e, filePath, content) => {
  * 所以改成:CDP 全页截图(captureBeyondViewport,用的是屏幕布局,不受打印重排影响)
  * → 把整页图片包成一张等大的单页 PDF。代价是文字不可选,但对"发给人看"的展示场景
  * 反而是像素级忠实;需要可选文字/交接开发的走"复制整页代码"。 */
-ipcMain.handle('clay:export-pdf', async (_e, defaultName, html) => {
+ipcMain.handle('clay:export-pdf', async (_e, defaultName, html, width, sourcePath) => {
+  // 渲染宽度跟着渲染进程里"当前选中的视图"走(桌面/平板/手机),不再固定死;
+  // 传值异常(没传、非数)时退回旧的桌面默认宽度,兜底不出错。
+  const shotWidth = Number.isFinite(width) && width > 0 ? Math.round(Math.min(width, 4000)) : 1280;
   let filePath;
   if (process.env.CLAY_PDF_OUT) {
     // 测试接缝(同 CLAY_USERDATA 思路):跳过原生对话框,直接写到指定路径。env 不设时零影响。
@@ -172,12 +183,17 @@ ipcMain.handle('clay:export-pdf', async (_e, defaultName, html) => {
   try {
     shotWin = new BrowserWindow({
       show: false,
-      width: 1280,
+      width: shotWidth,
       height: 900,
       webPreferences: { javascript: true, contextIsolation: true, nodeIntegration: false },
     });
+    /* 相对路径的图片/素材(AI 工具常见的"HTML + 图片文件夹"组合):这份 HTML 被写到
+     * 系统临时目录去渲染截图,和原文件根本不在同一个文件夹,相对路径全部解析错位、
+     * 图会裂 —— 跟画布编辑时踩过的是同一类问题(见 renderer/app.js 的 applyCanvasBase),
+     * 这里同样插一个指回源文件目录的 <base>,只影响这次内部渲染,不进最终 PDF 内容。 */
+    const htmlToRender = sourcePath ? injectBaseTag(html, sourcePath) : html;
     tmpHtml = path.join(app.getPath('temp'), 'clay-pdf-' + Date.now() + '.html');
-    fs.writeFileSync(tmpHtml, html, 'utf8');
+    fs.writeFileSync(tmpHtml, htmlToRender, 'utf8');
     await shotWin.loadFile(tmpHtml);
     await new Promise((r) => setTimeout(r, 400));
 

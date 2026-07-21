@@ -189,7 +189,9 @@
         '<span class="rc-name"></span>' +
         '<span class="rc-path"></span>' +
         '<span class="rc-remove" title="从最近移除">' + window.icon('close', 11) + '</span>';
-      c.querySelector('.rc-name').textContent = r.name || r.path.split('/').pop();
+      const nameEl = c.querySelector('.rc-name');
+      nameEl.textContent = r.name || r.path.split('/').pop();
+      nameEl.title = nameEl.textContent;   // 截断后仍能悬停看到完整文件名
       c.querySelector('.rc-path').textContent = prettyDir(r.path) || '本地文件';
       c.onclick = (e) => {
         if (e.target.closest('.rc-remove')) { removeRecent(r.path); return; }
@@ -198,6 +200,49 @@
       grid.appendChild(c);
     });
     mount.appendChild(grid);
+    fitRecentCardNames();
+  }
+
+  /* 标题用的手写字体(--hand)是异步换字体:先拿系统备用字体量一次宽度、判定"不用截断",
+   * 字体换好后再用更宽的手写字重绘,但浏览器不会为此重新触发一次 CSS text-overflow 判定——
+   * 于是布局判定用的是窄字体的宽度,实际画出来的是宽字体,文字就真的溢出卡片边界了
+   * (不是显示问题,是实测复现过的真 bug)。改成不依赖 CSS 自动截断:用 canvas 量出这个
+   * 元素"此刻实际会用的字体"画这行字要多宽,超了就在 JS 里手动截短加省略号 —— 跟字体
+   * 什么时候换好完全无关,量的就是最终会画出来的宽度。 */
+  function truncateToWidth(text, maxPx, font) {
+    const canvas = truncateToWidth._canvas || (truncateToWidth._canvas = document.createElement('canvas'));
+    const ctx = canvas.getContext('2d');
+    ctx.font = font;
+    if (ctx.measureText(text).width <= maxPx) return text;
+    const ellipsis = '…';
+    let lo = 0, hi = text.length;
+    while (lo < hi) {   // 二分找能塞下的最长前缀
+      const mid = (lo + hi + 1) >> 1;
+      if (ctx.measureText(text.slice(0, mid) + ellipsis).width <= maxPx) lo = mid; else hi = mid - 1;
+    }
+    return text.slice(0, lo) + ellipsis;
+  }
+  function fitRecentCardNames() {
+    const run = () => {
+      $$('.rc-name').forEach((el) => {
+        // 存一份没截断过的原文,重复调用(布局稳定前会跑好几次)不会拿已经截断的文本再截一轮
+        if (!el.dataset.full) el.dataset.full = el.textContent;
+        // 量父卡片的内容宽度,不量它自己的 clientWidth —— flex 子项没设 min-width:0 时
+        // 会被长文本撑宽(实测复现过),这时量自己等于拿"已经撑宽的盒子"去判断要不要截断,
+        // 永远判断不需要。虽然 CSS 那边也补了 min-width:0,这里量父级是双重保险。
+        const card = el.closest('.recent-card');
+        if (!card) return;
+        const cardCs = getComputedStyle(card);
+        const avail = card.clientWidth - parseFloat(cardCs.paddingLeft) - parseFloat(cardCs.paddingRight);
+        if (!avail || avail <= 0) return;
+        const cs = getComputedStyle(el);
+        const font = cs.fontStyle + ' ' + cs.fontWeight + ' ' + cs.fontSize + '/' + cs.lineHeight + ' ' + cs.fontFamily;
+        el.textContent = truncateToWidth(el.dataset.full, avail, font);
+      });
+    };
+    run();   // 先跑一次,大多数情况字体已经就绪
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(run);   // 字体换好后再量一遍兜底
+    requestAnimationFrame(run);   // 布局(卡片宽度)稳定后再量一遍,双重保险
   }
 
   /* ── 样式面板(中文化,面向非技术用户)──────────
@@ -364,6 +409,57 @@
     return editor;
   }
 
+  /* 相对路径的图片/资源(常见于 AI 工具导出的"HTML + 素材文件夹"):浏览器直接打开
+   * 原文件时,相对路径天然以文件所在目录为基准解析,能正常显示;但 Clay 画布是独立的
+   * iframe,不带这个基准,同样的相对路径会解析错位,图裂成"未找到"占位符。
+   * 修法:给 iframe 的 <head> 插一个指回源文件目录的 <base>,相对路径就能按浏览器里
+   * 同样的方式解析。没有源文件(粘贴导入)时清空,不装错的。 */
+  function applyCanvasBase(doc, sourcePath) {
+    const old = doc.getElementById('clay-base');
+    if (old) old.remove();
+    if (!sourcePath) return;
+    const dir = sourcePath.slice(0, sourcePath.lastIndexOf('/') + 1);
+    const href = 'file://' + dir.split('/').map(encodeURIComponent).join('/');
+    const base = doc.createElement('base');
+    base.id = 'clay-base';
+    base.href = href;
+    doc.head.insertBefore(base, doc.head.firstChild);
+  }
+
+  /* 插入 base 这件事不跟 GrapesJS 的渲染时机打游击 —— 实测踩过两次坑:
+   *  1) 本次会话第一次导入时,画布 iframe 的 document 还没就绪,插入静默落空;
+   *  2) 就算插成功了,紧随其后的 setComponents()/loadProjectData() 会把 <head>
+   *     按它自己的组件快照整个重置一遍(它不认识我们手动插的节点),又把它冲掉。
+   * 索性都不在"装内容之前"插,统一放到装完之后的自愈扫描里、错开几拍反复补:
+   * 不管 GrapesJS 什么时候把 head/图片弄乱,下一拍总能追上来修好。
+   * 每一拍都校验"现在是不是还在看这个文档",避免快速切标签页时张冠李戴。 */
+  function healCanvas(ed, docId) {
+    if (ed !== editor || docId !== activeDocId) return;   // 早就切走了,别乱插手
+    const d = docs.find((x) => x.id === docId);
+    if (!d) return;
+    try {
+      const doc = ed.Canvas.getDocument();
+      if (doc && doc.head) applyCanvasBase(doc, d.sourcePath);   // 幂等:href 没变就不动
+      const wrapper = ed.getWrapper();
+      if (!wrapper) return;
+      // "DOM 显示的 src 跟组件模型里的原始 src 对不上"(被换成了失败占位图),或者
+      // "src 没变但加载完了却是 0 宽"(失败但没触发占位替换)—— 从模型里的干净原值
+      // 重新触发一次加载。先移除属性再设回去,确保浏览器一定当作"变了"重新发请求。
+      wrapper.find('img').forEach((comp) => {
+        const el = comp.getEl && comp.getEl();
+        const real = comp.getAttributes && comp.getAttributes().src;
+        if (!el || !real) return;
+        const broken = el.getAttribute('src') !== real || (el.complete && el.naturalWidth === 0);
+        if (!broken) return;
+        el.removeAttribute('src');
+        el.setAttribute('src', real);
+      });
+    } catch (e) { /* 这一拍画布没就绪就跳过,下一拍还会再试 */ }
+  }
+  function scheduleCanvasHeal(ed, docId) {
+    [0, 300, 900, 2000].forEach((t) => setTimeout(() => healCanvas(ed, docId), t));
+  }
+
   /* 选中元素后浮出的那四个按钮,原本全靠猜。这里给它们加悬停提示。
    * 按 toolbar 模型里的 command 认人,而不是认图标或位置 ——
    * 不同组件类型的按钮数量会变(第一个"选父级"在模型里没有 command)。 */
@@ -437,6 +533,7 @@
     enableDirectDrag(ed);
     enableImageReplace(ed);
     enableAddEmpty(ed);
+    enableCanvasFileDrop(ed);
   }
 
   /* 选中元素后的第五个工具:在它下方插入一个"同类型、继承相同类名(样式一致)、内容为空"的元素。
@@ -1166,6 +1263,7 @@
     activeDocId = id;
     docTailwind = d.isTailwind;
     const ed = ensureEditor(d.isTailwind);
+    scheduleCanvasHeal(ed, d.id);   // 相对路径图片要指回这个文档的源目录;装完内容后再补,见函数注释
     histSuppressed = true;
     ed.loadProjectData(d.data);
     // 上一个文档的撤销栈对这个文档毫无意义,还会串门:清掉,历史从本次打开重新记
@@ -1301,6 +1399,84 @@
     input.click();
   }
 
+  /* 从桌面把 HTML 文件拖进窗口 → 自动打开。全窗口都能接(顶层 UI + 画布 iframe 内部
+   * 都单独绑了一份,见下面 enableCanvasFileDrop),因为这本质上和 ⌘O 打开文件是同一件事。
+   * 拖来的 File 对象不带磁盘路径(渲染进程沙箱化后 File.path 拿不到了),
+   * 用 preload 里的 webUtils.getPathForFile 换真实路径,再走 readPath 读内容——
+   * 和"打开文件"、"最近编辑"走的是同一条读取路径,行为完全一致。 */
+  let dropDepth = 0;   // dragenter/dragleave 会在子元素间反复触发,用计数器防止提前收起遮罩;
+                        // 顶层和画布 iframe 两套监听共用同一个计数器,跨边界移动也不会提前收起
+  function isFileDrag(e) { return e.dataTransfer && [...e.dataTransfer.types].includes('Files'); }
+
+  async function importDroppedFiles(fileList) {
+    const files = [...fileList].filter((f) => /\.html?$/i.test(f.name));
+    if (!files.length) { toast('只能拖 .html / .htm 文件'); return; }
+    // 依次导入,不并发 —— runImport 里可能弹"文件已打开/磁盘变了"确认框,
+    // 并发跑会导致好几个确认框同时弹出、互相打架
+    for (const f of files) {
+      const p = window.clay.getPathForFile(f);
+      if (!p) continue;
+      const got = await window.clay.readPath(p);
+      if (got) await runImport(got.content, got.name.replace(/\.html?$/i, ''), got.path);
+    }
+  }
+
+  // 挂一套拖拽监听到任意 EventTarget(顶层 window 或画布 iframe 的 document 都用这套)
+  function bindFileDropTarget(target) {
+    const overlay = $('#drop-overlay');
+    target.addEventListener('dragenter', (e) => {
+      if (!isFileDrag(e)) return;
+      e.preventDefault();
+      dropDepth++;
+      overlay.hidden = false;
+    });
+    target.addEventListener('dragover', (e) => {
+      if (!isFileDrag(e)) return;
+      e.preventDefault();   // 必须 preventDefault,否则浏览器默认行为是拒绝 drop
+      e.dataTransfer.dropEffect = 'copy';
+    });
+    target.addEventListener('dragleave', (e) => {
+      if (!isFileDrag(e)) return;
+      dropDepth = Math.max(0, dropDepth - 1);
+      if (dropDepth === 0) overlay.hidden = true;
+    });
+    target.addEventListener('drop', async (e) => {
+      if (!isFileDrag(e)) return;
+      e.preventDefault();
+      dropDepth = 0;
+      overlay.hidden = true;
+      await importDroppedFiles(e.dataTransfer.files);
+    });
+  }
+
+  function enableFileDrop() {
+    if (!(window.clay && window.clay.getPathForFile && window.clay.readPath)) return;   // 浏览器预览环境跳过
+    bindFileDropTarget(window);
+  }
+
+  /* 画布是独立的 iframe(有自己的 document/window),原生文件拖拽落在它上面时,
+   * 事件根本不会冒泡到外层的 window —— 实测过:一旦打开了任意文档,画布区域
+   * 中心点 elementFromPoint 命中的就是 IFRAME 本身,顶层监听彻底收不到。
+   * 所以画布内部要单独绑一份同样的处理。iframe 文档就绪时机不可靠(这坑在
+   * enableDirectDrag 那儿也踩过),用同一套"事件 + 轮询兜底"来绑,绑过一次
+   * 就在 document 上打标记,防止重复绑。 */
+  function enableCanvasFileDrop(ed) {
+    if (!(window.clay && window.clay.getPathForFile && window.clay.readPath)) return;
+    const bind = () => {
+      const cdoc = ed.Canvas.getDocument();
+      if (!cdoc || !cdoc.body || cdoc.__clayFileDropBound) return false;
+      cdoc.__clayFileDropBound = true;
+      bindFileDropTarget(cdoc);
+      return true;
+    };
+    ed.on('load', bind);
+    ed.on('canvas:frame:load:body', bind);
+    bind();
+    const timer = setInterval(() => { if (bind()) clearInterval(timer); }, 200);
+    setTimeout(() => clearInterval(timer), 15000);
+    ed.on('destroy', () => clearInterval(timer));
+  }
+
   async function runImport(raw, fileName, sourcePath, sampleKey) {
     if (!raw || !raw.trim()) { toast('先粘贴 HTML 代码'); return; }
 
@@ -1354,6 +1530,7 @@
     };
     docs.push(doc);
     activeDocId = doc.id;
+    scheduleCanvasHeal(ed, doc.id);   // 相对路径图片要指回源目录,见函数注释里踩过的坑
     // 会话基线:记下导入时刻的内容签名;粘贴来的天生未保存(baseDirty=true)
     setSessionMark(doc.id, claySig(ed), !!doc.dirty);
     if (sourcePath) addRecent(sourcePath, doc.name);   // 有源文件才进"最近编辑"
@@ -1433,6 +1610,22 @@
 
   /* 导出 PDF:交给主进程用隐藏窗口渲染那份自包含 HTML 再 printToPDF。
    * 这是"给人看"的终点(发老板、贴周报),和"给开发"的复制代码是两条路。 */
+  /* PDF 用哪个宽度渲染:跟着工具栏当前选中的视图走,不再固定死一个值。
+   * 平板/手机是设备管理器里配好的固定宽度;桌面视图本身是流式的(没有固定宽),
+   * 所以直接量画布 iframe 此刻的真实渲染宽度 —— 你在 Clay 里看到的是什么宽度,
+   * 导出就按什么宽度截,所见即所得。 */
+  function currentExportWidth() {
+    const id = (editor && editor.getDevice && editor.getDevice()) || 'desktop';
+    if (id === 'tablet') return 768;
+    if (id === 'mobile') return 375;
+    try {
+      const fr = editor.Canvas.getFrameEl();
+      const w = fr && fr.clientWidth;
+      if (w > 0) return w;
+    } catch (e) { /* 量不到就退回下面的默认值 */ }
+    return 1440;   // 常见的桌面设计宽度,量不到画布宽度时兜底
+  }
+
   async function exportPdf() {
     if (!editor || !activeDocId) { toast('还没有可导出的页面'); return; }
     const d = docs.find((x) => x.id === activeDocId);
@@ -1441,7 +1634,9 @@
     const result = window.ClayExporter.build(editor, d);
     const base = (d.name || 'page').replace(/[\/\\:*?"<>|]/g, '-').replace(/(-clay)+$/i, '').slice(0, 40);
     toast('正在生成 PDF…');
-    const r = await window.clay.exportPdf(base + '.pdf', result.code);
+    // 相对路径图片(素材文件夹场景)要指回源目录 —— PDF 渲染用的临时文件不和原文件同目录,
+    // 跟画布里那个问题是同一类,这里传源路径给主进程去插 base 修
+    const r = await window.clay.exportPdf(base + '.pdf', result.code, currentExportWidth(), d.sourcePath || '');
     if (!r) return;                                   // 用户取消了保存框
     if (!r.ok) { toast('PDF 导出失败:' + (r.error || '未知错误')); return; }
     toast('已导出 ' + r.path.split('/').pop());
@@ -1742,6 +1937,7 @@
     set('#btn-save .btn-ic', 'save', 14);
     set('#btn-export-pdf .btn-ic', 'pdf', 14);
     set('#btn-empty-import .btn-ic', 'upload', 15);
+    set('.drop-ic', 'upload', 34);
     set('#btn-open-file .btn-ic', 'folder', 14);
     set('#btn-select-parent', 'parent', 12);
     $('#btn-select-parent').insertAdjacentText('beforeend', '上一层');
@@ -1854,6 +2050,7 @@
   window.__clay = { runImport, getDocs: () => docs, getRecents: () => recents, saveToSource, saveAsCopy, exportPdf, copyCode, closeDoc, jumpHistory, renderHistory, renderHome, openRecent };
 
   wireUI();
+  enableFileDrop();
   enableLiveStyleInput();
   enableToolbarTips();
   refreshSelectionUI();

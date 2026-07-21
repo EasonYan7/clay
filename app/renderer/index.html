@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Clay</title>
   <link rel="stylesheet" href="vendor/grapes.min.css">
-  <link rel="stylesheet" href="styles.css?v=37">
+  <link rel="stylesheet" href="styles.css?v=46">
 </head>
 <body>
   <div id="app">
@@ -166,13 +166,21 @@
   <!-- 手绘标注层:必须覆盖整个窗口才够得到顶部工具栏(画布容器在工具栏下方) -->
   <svg id="sketch-layer" aria-hidden="true" hidden></svg>
 
+  <!-- 拖文件进窗口打开:全窗口覆盖,不管当前在主页还是画布里都能接住 -->
+  <div id="drop-overlay" hidden>
+    <div class="drop-card">
+      <span class="drop-ic"></span>
+      <p>松开鼠标,打开这个 HTML 文件</p>
+    </div>
+  </div>
+
   <div id="toast" hidden></div>
 
   <script src="vendor/grapes.min.js"></script>
-  <script src="icons.js?v=37"></script>
-  <script src="samples.js?v=37"></script>
-  <script src="importer.js?v=37"></script>
-  <script src="exporter.js?v=37"></script>
-  <script src="app.js?v=37"></script>
+  <script src="icons.js?v=46"></script>
+  <script src="samples.js?v=46"></script>
+  <script src="importer.js?v=46"></script>
+  <script src="exporter.js?v=46"></script>
+  <script src="app.js?v=46"></script>
 </body>
 </html>

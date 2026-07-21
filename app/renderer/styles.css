@@ -382,10 +382,15 @@ body.light .empty-card h1 em::after {
 .rc-name {
   font-family: var(--hand); font-weight: 600; font-size: 15px; color: var(--text);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  /* flex 子项默认 min-width:auto,长文本会把这个盒子本身撑宽、突破卡片分配给它的宽度
+   * (撑宽之后 overflow:hidden 也救不了,因为盒子已经跟着内容变大了,不是内容溢出盒子)。
+   * min-width:0 强制它服从父级分配的宽度,盒子不再随内容变化,截断判定才有意义。 */
+  min-width: 0;
 }
 .rc-path {
   font-size: 11px; color: var(--text-3);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  min-width: 0;
 }
 .rc-remove {
   position: absolute; top: 5px; right: 6px; display: flex; padding: 3px;
@@ -531,6 +536,26 @@ body.light .empty-card h1 em::after {
   z-index: 200; padding: 9px 16px; border-radius: var(--radius);
   background: var(--surface-3); border: 1px solid var(--border-2);
   color: var(--text); font-size: 12.5px; box-shadow: var(--shadow);
+}
+
+/* 拖文件进窗口:全屏覆盖 + 虚线卡片,呼应主页的手绘调性 */
+#drop-overlay {
+  position: fixed; inset: 0; z-index: 300;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(0, 0, 0, .5); backdrop-filter: blur(2px);
+  pointer-events: none;   /* 只是视觉反馈,不挡下面真正接 drop 事件的元素 */
+}
+#drop-overlay[hidden] { display: none; }
+.drop-card {
+  display: flex; flex-direction: column; align-items: center; gap: 14px;
+  padding: 42px 56px; border-radius: 20px 14px 22px 16px;
+  border: 2.5px dashed var(--ink);
+  background: var(--surface); box-shadow: var(--shadow);
+}
+.drop-ic { color: var(--ink); }
+.drop-ic svg { width: 34px; height: 34px; }
+.drop-card p {
+  margin: 0; font-family: var(--hand); font-size: 17px; font-weight: 600; color: var(--text);
 }
 
 /* 元素工具条的悬停提示(那四个按钮原本没有任何说明) */
