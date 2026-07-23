@@ -634,9 +634,13 @@
         if (!target.parent || !target.parent()) return null;
         const r = el.getBoundingClientRect();
         const pEl = el.parentElement;
-        const horizontal = pEl && /row|grid/.test(
-          cdoc.defaultView.getComputedStyle(pEl).display === 'grid' ? 'grid'
-          : cdoc.defaultView.getComputedStyle(pEl).flexDirection || '');
+        // flex-direction 的 computed 值对普通 block 容器也默认是 'row',不能直接拿它判横排 ——
+        // 否则竖直堆叠的 block 子元素会被误当成横排,插入线画成竖线、还按 X 坐标判前后。
+        // 只有真的是 flex 容器才信 flex-direction;grid 视为横排;其余一律按竖排。
+        const disp = pEl ? cdoc.defaultView.getComputedStyle(pEl).display : '';
+        const horizontal = disp === 'grid'
+          || ((disp === 'flex' || disp === 'inline-flex')
+              && /^row/.test(cdoc.defaultView.getComputedStyle(pEl).flexDirection || ''));
         const after = horizontal
           ? e.clientX > r.x + r.width / 2
           : e.clientY > r.y + r.height / 2;

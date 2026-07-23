@@ -195,12 +195,19 @@ ipcMain.handle('clay:export-pdf', async (_e, defaultName, html, width, sourcePat
     tmpHtml = path.join(app.getPath('temp'), 'clay-pdf-' + Date.now() + '.html');
     fs.writeFileSync(tmpHtml, htmlToRender, 'utf8');
     await shotWin.loadFile(tmpHtml);
-    await new Promise((r) => setTimeout(r, 400));
 
     // 先滚一遍触发滚动渐显(opacity:0→显示),回顶;再关掉动画/过渡,避免截到中间态残影
     const dim = await shotWin.webContents.executeJavaScript(`(async () => {
       const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
       const H = () => Math.max(document.documentElement.scrollHeight, document.body.scrollHeight, document.documentElement.offsetHeight);
+      // 事件驱动地等真正就绪,替代旧的固定 setTimeout(400):慢机器/大图/未加载完的
+      // Web 字体下,固定延时会截到"字体没换好、图还没出来"的中间态。
+      try { await document.fonts.ready; } catch (e) { /* 不支持 fonts API 就跳过 */ }
+      await Promise.all([...document.images].map((img) => {
+        if (img.complete) return null;
+        if (img.decode) return img.decode().catch(() => {});   // decode 比 onload 更接近"能画出来"
+        return new Promise((res) => { img.onload = img.onerror = res; });
+      }));
       for (let y = 0; y <= H(); y += Math.max(240, innerHeight * 0.8)) { scrollTo(0, y); await sleep(50); }
       scrollTo(0, 0);
       const s = document.createElement('style');
@@ -242,7 +249,13 @@ ipcMain.handle('clay:export-pdf', async (_e, defaultName, html, width, sourcePat
     tmpWrap = path.join(app.getPath('temp'), 'clay-pdf-wrap-' + Date.now() + '.html');
     fs.writeFileSync(tmpWrap, wrap, 'utf8');
     await wrapWin.loadFile(tmpWrap);
-    await new Promise((r) => setTimeout(r, 300));
+    // 等那张整页大图真正解码完再打印,替代固定 setTimeout(300):图未就绪时 printToPDF 会出空白页
+    await wrapWin.webContents.executeJavaScript(`(async () => {
+      const img = document.images[0];
+      if (!img) return;
+      if (!img.complete) await new Promise((res) => { img.onload = img.onerror = res; });
+      if (img.decode) { try { await img.decode(); } catch (e) { /* 解码失败也继续,总比卡死好 */ } }
+    })()`);
 
     const pdf = await wrapWin.webContents.printToPDF({ printBackground: true, preferCSSPageSize: true });
     fs.writeFileSync(filePath, pdf);
