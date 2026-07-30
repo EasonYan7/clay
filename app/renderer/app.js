@@ -426,6 +426,25 @@
     doc.head.insertBefore(base, doc.head.firstChild);
   }
 
+  /* 画布保真:把原始 CSS 原文补进画布 iframe 的 <head> 末尾。
+   * 起因:GrapesJS 的 CSS 解析器会丢弃任何值里含 var() 的声明(实测复现——
+   * `.hero { background: …, linear-gradient(…, var(--navy) …) }` 整条 background 被扔,
+   * 画布里 hero 变透明、透出浅色 body,而 :root 的变量定义留着却没人引用得到)。
+   * 后果只在编辑画布里:导出走的是原文(exporter 用 doc.styleText),颜色本来就是对的。
+   * 为了让"编辑时看到的"和"导出/浏览器里的"一致,这里把原文作为只读 <style> 追加到
+   * <head> 末尾——它排在 GrapesJS 解析后的样式之后,同权重时原文获胜,var() 规则得以
+   * 正常渲染;用户在面板上的改动走 #id 规则(优先级更高)照常覆盖,不受影响。
+   * 只影响画布显示:不进组件模型、不进撤销栈、不进导出。id 固定,切文档时整块换成当前页的原文。 */
+  function applyCanvasFidelityCss(doc, styleText) {
+    const old = doc.getElementById('clay-fidelity');
+    if (old) old.remove();
+    if (!styleText || !styleText.trim()) return;
+    const style = doc.createElement('style');
+    style.id = 'clay-fidelity';
+    style.textContent = styleText;
+    doc.head.appendChild(style);   // 末尾:压过 GrapesJS 解析后(丢了 var())的同名规则
+  }
+
   /* 插入 base 这件事不跟 GrapesJS 的渲染时机打游击 —— 实测踩过两次坑:
    *  1) 本次会话第一次导入时,画布 iframe 的 document 还没就绪,插入静默落空;
    *  2) 就算插成功了,紧随其后的 setComponents()/loadProjectData() 会把 <head>
@@ -439,7 +458,10 @@
     if (!d) return;
     try {
       const doc = ed.Canvas.getDocument();
-      if (doc && doc.head) applyCanvasBase(doc, d.sourcePath);   // 幂等:href 没变就不动
+      if (doc && doc.head) {
+        applyCanvasBase(doc, d.sourcePath);              // 幂等:href 没变就不动
+        applyCanvasFidelityCss(doc, d.styleText);        // 补回 var() 等被 GrapesJS 丢掉的原始样式
+      }
       const wrapper = ed.getWrapper();
       if (!wrapper) return;
       // "DOM 显示的 src 跟组件模型里的原始 src 对不上"(被换成了失败占位图),或者
