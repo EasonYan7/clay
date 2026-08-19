@@ -369,10 +369,11 @@ body.light .empty-card h1 em::after {
   font-family: var(--hand); font-size: 15px; color: var(--text-3);
   margin: 0 0 14px 2px;
 }
-.recent-grid { display: grid; gap: 12px; }
+.recent-grid { display: grid; gap: 12px; min-width: 0; }
 .recent-card {
   position: relative; display: flex; flex-direction: column; gap: 3px;
-  padding: 12px 13px 13px; cursor: pointer; text-align: left; min-width: 0;
+  width: 100%; max-width: 100%; min-width: 0; overflow: hidden;
+  padding: 12px 13px 13px; cursor: pointer; text-align: left;
   background: var(--surface);
   border: 1.5px solid var(--border-2); border-radius: 13px 9px 12px 10px;
   transition: transform .16s cubic-bezier(.2,.8,.2,1), border-color .16s;
@@ -380,6 +381,7 @@ body.light .empty-card h1 em::after {
 .recent-card:hover { transform: translateY(-3px) rotate(0deg) !important; border-color: var(--ink); }
 .rc-ic { color: var(--ink); opacity: .8; margin-bottom: 2px; }
 .rc-name {
+  display: block; width: 100%; max-width: 100%;
   font-family: var(--hand); font-weight: 600; font-size: 15px; color: var(--text);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   /* flex 子项默认 min-width:auto,长文本会把这个盒子本身撑宽、突破卡片分配给它的宽度
@@ -388,6 +390,7 @@ body.light .empty-card h1 em::after {
   min-width: 0;
 }
 .rc-path {
+  display: block; width: 100%; max-width: 100%;
   font-size: 11px; color: var(--text-3);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   min-width: 0;

@@ -47,24 +47,185 @@
     return false;
   }
 
+  function attrsOf(el) {
+    const out = {};
+    if (!el) return out;
+    [...el.attributes].forEach((a) => { out[a.name] = a.value; });
+    return out;
+  }
+
+  function inlineStyleOf(el) {
+    const out = {};
+    if (!el || !el.style) return out;
+    for (let i = 0; i < el.style.length; i++) {
+      const name = el.style[i];
+      let value = el.style.getPropertyValue(name);
+      if (el.style.getPropertyPriority(name)) value += ' !important';
+      out[name] = value;
+    }
+    return out;
+  }
+
+  /* 只解析 Tailwind config 的“纯数据子集”:对象/数组/字符串/数字/布尔/null。
+   * 不用 eval/Function,遇到函数、变量引用、getter、展开等任何可执行语法就放弃,
+   * 这样能覆盖 AI 页面最常见的自定义颜色/字体/spacing,又不会把任意业务脚本带进画布。 */
+  function parseDataLiteral(source) {
+    let i = 0;
+    const ws = () => {
+      while (i < source.length) {
+        if (/\s/.test(source[i])) { i++; continue; }
+        if (source.slice(i, i + 2) === '//') {
+          i += 2; while (i < source.length && source[i] !== '\n') i++;
+          continue;
+        }
+        if (source.slice(i, i + 2) === '/*') {
+          const end = source.indexOf('*/', i + 2);
+          if (end < 0) throw new Error('comment');
+          i = end + 2; continue;
+        }
+        break;
+      }
+    };
+    const string = () => {
+      const quote = source[i++];
+      let out = '';
+      while (i < source.length) {
+        const ch = source[i++];
+        if (ch === quote) return out;
+        if (ch !== '\\') { out += ch; continue; }
+        if (i >= source.length) throw new Error('escape');
+        const e = source[i++];
+        const map = { n: '\n', r: '\r', t: '\t', b: '\b', f: '\f', v: '\v', '0': '\0' };
+        if (e === 'u') {
+          const hex = source.slice(i, i + 4);
+          if (!/^[0-9a-f]{4}$/i.test(hex)) throw new Error('unicode');
+          out += String.fromCharCode(parseInt(hex, 16)); i += 4;
+        } else out += Object.prototype.hasOwnProperty.call(map, e) ? map[e] : e;
+      }
+      throw new Error('string');
+    };
+    const ident = () => {
+      const m = source.slice(i).match(/^[A-Za-z_$][\w$-]*/);
+      if (!m) throw new Error('identifier');
+      i += m[0].length;
+      return m[0];
+    };
+    const value = () => {
+      ws();
+      const ch = source[i];
+      if (ch === '"' || ch === "'") return string();
+      if (ch === '{') {
+        i++; const out = Object.create(null); ws();
+        if (source[i] === '}') { i++; return out; }
+        while (i < source.length) {
+          ws();
+          const key = source[i] === '"' || source[i] === "'" ? string() : ident();
+          ws(); if (source[i++] !== ':') throw new Error('colon');
+          out[key] = value(); ws();
+          if (source[i] === '}') { i++; return out; }
+          if (source[i++] !== ',') throw new Error('comma');
+          ws(); if (source[i] === '}') { i++; return out; }
+        }
+      }
+      if (ch === '[') {
+        i++; const out = []; ws();
+        if (source[i] === ']') { i++; return out; }
+        while (i < source.length) {
+          out.push(value()); ws();
+          if (source[i] === ']') { i++; return out; }
+          if (source[i++] !== ',') throw new Error('comma');
+          ws(); if (source[i] === ']') { i++; return out; }
+        }
+      }
+      const num = source.slice(i).match(/^-?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?/i);
+      if (num) { i += num[0].length; return Number(num[0]); }
+      const word = ident();
+      if (word === 'true') return true;
+      if (word === 'false') return false;
+      if (word === 'null') return null;
+      throw new Error('executable');
+    };
+    const result = value();
+    ws(); if (source[i] === ';') { i++; ws(); }
+    if (i !== source.length) throw new Error('trailing');
+    return result;
+  }
+
+  function tailwindConfigOf(scriptEls) {
+    for (const s of scriptEls) {
+      const text = s.textContent || '';
+      const m = text.match(/(?:window\s*\.\s*)?tailwind\s*\.\s*config\s*=/);
+      if (!m) continue;
+      try { return parseDataLiteral(text.slice(m.index + m[0].length).trim()); }
+      catch (e) { /* 含可执行语法:安全起见不在编辑画布运行,导出仍原样保留 */ }
+    }
+    return null;
+  }
+
   function parse(raw) {
     const doc = new DOMParser().parseFromString(raw, 'text/html');
     const report = { dropped: [] };
 
-    // 收集内嵌样式
-    const styleText = [...doc.querySelectorAll('style')]
-      .map((s) => s.textContent).join('\n');
+    /* 保真所需的 head 不能只压成一坨 CSS 文本:
+     * - <link rel="stylesheet"> 常承载字体/图标/整站样式;
+     * - 多个 style/link 的先后顺序就是 cascade 的一部分;
+     * - <style media> 的 media 属性一旦丢掉,打印样式会错误地套到屏幕上。
+     * 因此保留原始节点及顺序,画布和导出都复用这一份。charset/viewport/title
+     * 由导出器单独正规化,避免重复。 */
+    const headNodes = [...doc.head.children].map((el) => {
+      const tag = el.tagName.toLowerCase();
+      const name = (el.getAttribute('name') || '').toLowerCase();
+      if (tag === 'title' || (tag === 'meta' && (el.hasAttribute('charset') || name === 'viewport'))) return null;
+      return { tag, html: el.outerHTML };
+    }).filter(Boolean);
+    // 不规范但常见的生成页会把 style/link 放进 body。视觉上它们仍参与全局级联；
+    // 统一追加到结构化样式序列，避免导入时删除后在画布和导出里彻底消失。
+    [...doc.body.querySelectorAll('style, link[rel~="stylesheet" i]')].forEach((el) => {
+      headNodes.push({ tag: el.tagName.toLowerCase(), html: el.outerHTML });
+    });
+    const viewportEl = doc.querySelector('meta[name="viewport" i]');
+    const viewport = viewportEl ? viewportEl.getAttribute('content') || '' : '';
+    const baseEl = doc.head.querySelector('base[href]');
+    const baseHref = baseEl ? baseEl.getAttribute('href') || '' : '';
 
-    // 脚本不丢弃:暂存起来,编辑器内不执行,导出时原样还原
-    // (AI 页面常带汉堡菜单/轮播等交互;早期版本直接删除会导出"死按钮")
+    // 收集内嵌样式
+    const styleEls = [...doc.querySelectorAll('style')];
+    const styleText = styleEls.map((s) => s.textContent).join('\n');
+    // CssComposer 仍要拿到作者规则,供样式面板/修改基线使用;但必须把 style[media]
+    // 翻成真正的 @media,不能像旧实现那样剥掉 media 后让打印规则污染屏幕。
+    const editorStyleText = styleEls.map((s) => {
+      const media = (s.getAttribute('media') || '').trim();
+      return media ? `@media ${media} {\n${s.textContent}\n}` : s.textContent;
+    }).join('\n');
+
+    // 脚本不丢弃:暂存起来,编辑器内不执行,导出时按原位置原样还原。
+    // body 里的脚本用不可见 template 占位,否则全部挪到 </body> 前会改变执行时序。
     const scriptEls = [...doc.querySelectorAll('script')];
-    const scripts = scriptEls
-      .filter((s) => !/tailwindcss/i.test(s.getAttribute('src') || '')) // Tailwind 运行时另行处理
-      .map((s) => ({ src: s.getAttribute('src') || '', content: s.src ? '' : s.textContent }));
+    const tailwindConfig = tailwindConfigOf(scriptEls);
+    const bodyScripts = [];
+    const scripts = scriptEls.map((s) => ({
+      src: s.getAttribute('src') || '',
+      content: s.getAttribute('src') ? '' : s.textContent,
+      html: s.outerHTML,
+      location: doc.body.contains(s) ? 'body' : 'head',
+    }));
     if (scripts.length) report.kept = `${scripts.length} 段交互脚本已暂存,导出时自动还原(编辑时不运行)`;
-    scriptEls.forEach((n) => n.remove());
+    scriptEls.forEach((n) => {
+      if (doc.body.contains(n)) {
+        const i = bodyScripts.length;
+        bodyScripts.push(n.outerHTML);
+        const marker = doc.createElement('template');
+        marker.setAttribute('data-clay-script', String(i));
+        n.replaceWith(marker);
+      } else {
+        n.remove();
+      }
+    });
     const links = doc.querySelectorAll('link[rel="stylesheet"]');
-    if (links.length) report.dropped.push(`${links.length} 个外部样式表链接`);
+    if (links.length) {
+      const note = `${links.length} 个外部样式表已保留`;
+      report.kept = report.kept ? report.kept + `;${note}` : note;
+    }
     links.forEach((n) => n.remove());
     doc.querySelectorAll('style').forEach((n) => n.remove());
 
@@ -90,9 +251,19 @@
 
     return {
       bodyHtml: body.innerHTML,
+      bodyAttrs: attrsOf(body),
+      bodyStyleMap: inlineStyleOf(body),
       bodyClass: (body.getAttribute('class') || '').trim(),
       bodyStyle: (body.getAttribute('style') || '').trim(),
+      htmlAttrs: attrsOf(doc.documentElement),
+      viewport,
+      baseHref,
+      headNodes,
+      bodyScripts,
+      tailwindConfig,
+      fidelityVersion: 2,
       styleText,
+      editorStyleText,
       title,
       docTitle,
       headMeta,
@@ -133,6 +304,7 @@
       case 'form': return '表单';
       case 'input': case 'textarea': case 'select': return '输入框';
       case 'table': return '表格';
+      case 'td': case 'th': return withText('单元格', comp);
       case 'video': return '视频';
       default:
         if (type === 'textnode') return null;
@@ -195,6 +367,20 @@
     if (comp.components) comp.components().forEach((c) => walk(c, fn));
   }
 
+  function cssBaseline(editor) {
+    const out = {};
+    try {
+      editor.Css.getRules().forEach((rule) => {
+        const sel = rule.selectorsToString ? rule.selectorsToString() : '';
+        const style = rule.styleToString ? rule.styleToString() : '';
+        if (!sel || !style.trim()) return;
+        const key = (rule.get('mediaText') || '') + '\u241f' + sel;
+        out[key] = style.replace(/\s+/g, ' ').trim();
+      });
+    } catch (e) { /* 老底座没有 Css API 时回退为空基线 */ }
+    return out;
+  }
+
   /* ── 主入口 ───────────────────────────────── */
   // 返回 { isTailwind, report };调用方负责在 Tailwind 模式切换时重建编辑器
   function importIntoEditor(editor, raw) {
@@ -204,26 +390,31 @@
     // 编辑器可能被上一个文档复用过:先彻底清场,否则上一页的 body 类和样式规则
     // 会漏进这一页(表现为浅色页面被上一页的 bg-slate-950 染黑)
     wrapper.getClasses().slice().forEach((c) => wrapper.removeClass(c));
+    // class/style 之外的 body 属性(data-theme/dir/lang/id...)也会参与选择器与排版。
+    // 切文档前先清掉上一页属性,再完整应用当前页,避免主题串页。
+    const oldAttrs = wrapper.getAttributes ? wrapper.getAttributes() : {};
+    Object.keys(oldAttrs || {}).forEach((name) => {
+      if (wrapper.removeAttributes) wrapper.removeAttributes(name);
+    });
     wrapper.setStyle({});
     editor.Css.clear();
 
     editor.setComponents(parsed.bodyHtml);
-    editor.setStyle(parsed.styleText);
+    editor.setStyle(parsed.editorStyleText || parsed.styleText);
 
-    // body 类迁移(修复:深色主题导入变白底)
-    if (parsed.bodyClass) {
-      parsed.bodyClass.split(/\s+/).forEach((c) => wrapper.addClass(c));
-    }
-    if (parsed.bodyStyle) {
-      const styleObj = {};
-      parsed.bodyStyle.split(';').forEach((d) => {
-        const i = d.indexOf(':');
-        if (i > 0) styleObj[d.slice(0, i).trim()] = d.slice(i + 1).trim();
-      });
-      wrapper.addStyle(styleObj);
-    }
+    // class/style 在 GrapesJS 中分别走 ClassManager / style model,不能只塞 attributes
+    // (会被内部正规化吃掉);其余 data-*/lang/dir 等按普通属性保留。
+    const bodyAttrs = Object.assign({}, parsed.bodyAttrs || {});
+    delete bodyAttrs.class;
+    delete bodyAttrs.style;
+    if (wrapper.addAttributes) wrapper.addAttributes(bodyAttrs);
+    if (parsed.bodyClass) parsed.bodyClass.split(/\s+/).filter(Boolean).forEach((c) => wrapper.addClass(c));
+    if (parsed.bodyStyleMap) wrapper.addStyle(parsed.bodyStyleMap);
     wrapper.set('custom-name', '页面');
     nameTree(wrapper);
+    // 保存“刚导入、尚未编辑”时的规则快照。导出时用当前规则减去这份基线,
+    // 才能识别带作者自定义 id 的元素修改;仅靠 #iXXX 会漏掉这类改动。
+    parsed.baselineRules = cssBaseline(editor);
     return parsed;
   }
 

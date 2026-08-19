@@ -1,14 +1,91 @@
 const { app, BrowserWindow, Menu, dialog, ipcMain } = require('electron');
 const fs = require('fs');
 const path = require('path');
+const { pathToFileURL } = require('url');
+const crypto = require('crypto');
 
 /* 测试隔离口子:自动化验证必须指到临时目录,绝不允许碰用户的真实工作区。
  * (改 HOME 环境变量在 macOS 上骗不过 Electron —— userData 不走 HOME,吃过亏。) */
 if (process.env.CLAY_USERDATA) app.setPath('userData', process.env.CLAY_USERDATA);
 
 let win = null;
+let closeApproved = false;
+let closeRequestPending = false;
+
+/* 当前编辑文件的外部变更监听。
+ *
+ * 监听父目录而不是文件本身:多数 AI/编辑器保存时会先写临时文件再 rename 覆盖原文件,
+ * 直接 fs.watch(file) 会在第一次 rename 后失效。目录监听可以跨过删除/重建,并继续等它回来。
+ * 主进程只保留当前页面的一路监听;渲染进程切页面/回主页时会同步切换或关闭。 */
+let sourceWatch = null;
+
+function contentDigest(content) {
+  return crypto.createHash('sha256').update(content, 'utf8').digest('hex');
+}
+
+function stopSourceWatch(senderId) {
+  if (!sourceWatch || (senderId !== undefined && sourceWatch.sender.id !== senderId)) return;
+  const old = sourceWatch;
+  sourceWatch = null;
+  if (old.timer) clearTimeout(old.timer);
+  try { old.watcher.close(); } catch (e) { /* 已关闭 */ }
+}
+
+function sendSourceChange(watch, payload) {
+  if (sourceWatch !== watch || watch.sender.isDestroyed()) return;
+  watch.sender.send('clay:source-changed', Object.assign({ path: watch.filePath }, payload));
+}
+
+function readWatchedSource(watch) {
+  if (sourceWatch !== watch) return;
+  watch.timer = null;
+  try {
+    const content = fs.readFileSync(watch.filePath, 'utf8');
+    const digest = contentDigest(content);
+    watch.retrying = false;
+    if (digest === watch.digest) return;   // chmod/重复 rename 等元数据噪音
+    watch.digest = digest;
+    watch.missing = false;
+    sendSourceChange(watch, { exists: true, content });
+  } catch (err) {
+    // 文件被原子替换时可能有极短的“不存在”窗口,再等一拍再判定真正丢失。
+    if (!watch.retrying) {
+      watch.retrying = true;
+      watch.timer = setTimeout(() => readWatchedSource(watch), 220);
+      return;
+    }
+    watch.retrying = false;
+    if (!watch.missing) {
+      watch.missing = true;
+      watch.digest = null;
+      sendSourceChange(watch, { exists: false });
+    }
+  }
+}
+
+function scheduleWatchedSourceRead(watch) {
+  if (sourceWatch !== watch) return;
+  if (watch.timer) clearTimeout(watch.timer);
+  watch.retrying = false;
+  watch.timer = setTimeout(() => readWatchedSource(watch), 180);
+}
+
+function refreshInternalWatch(filePath, content) {
+  if (!sourceWatch || path.resolve(filePath) !== sourceWatch.filePath) return;
+  // Clay 自己的写入在同一个事件循环里同步完成;先更新基线,随后到达的 fs.watch
+  // 通知只会读到同一摘要并被过滤。若外部工具紧接着又写了不同内容,摘要不同仍会通知。
+  sourceWatch.digest = contentDigest(content);
+  sourceWatch.missing = false;
+  sourceWatch.retrying = false;
+  if (sourceWatch.timer) {
+    clearTimeout(sourceWatch.timer);
+    sourceWatch.timer = null;
+  }
+}
 
 function createWindow() {
+  closeApproved = false;
+  closeRequestPending = false;
   win = new BrowserWindow({
     width: 1480,
     height: 940,
@@ -24,6 +101,22 @@ function createWindow() {
     },
   });
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+  win.on('close', (event) => {
+    if (closeApproved) return;
+    if (win.webContents.isDestroyed()) {
+      closeApproved = true;
+      return;
+    }
+    event.preventDefault();
+    if (closeRequestPending) return;
+    closeRequestPending = true;
+    win.webContents.send('clay:request-close');
+  });
+  win.on('closed', () => {
+    stopSourceWatch();
+    closeRequestPending = false;
+    win = null;
+  });
 }
 
 function buildMenu() {
@@ -124,6 +217,7 @@ ipcMain.handle('clay:save-file', async (_e, defaultName, content, sourcePath) =>
   }
 
   fs.writeFileSync(filePath, content, 'utf8');
+  refreshInternalWatch(filePath, content);
   return filePath;
 });
 
@@ -135,18 +229,28 @@ ipcMain.handle('clay:write-file', async (_e, filePath, content) => {
     const tmp = filePath + '.claytmp';
     fs.writeFileSync(tmp, content, 'utf8');
     fs.renameSync(tmp, filePath);
+    refreshInternalWatch(filePath, content);
     return { ok: true };
   } catch (err) {
     return { ok: false, error: String(err && err.message || err) };
   }
 });
 
-// 把 <base href="file://原目录/"> 插到 <head> 最前面,让相对路径按原文件的位置解析
-// (逻辑和 renderer/app.js 的 applyCanvasBase 对齐:每段路径单独编码,斜杠保留)
+// 把绝对 <base> 插到 <head> 最前面,让临时 PDF 页面按原文件的位置解析。
+// 原件若自带 <base href="../assets/">,必须先相对源文件求成绝对地址;仅仅指回源目录
+// 会让浏览器原件、Clay 画布、PDF 三边加载到不同资源。
 function injectBaseTag(html, sourcePath) {
-  const dir = sourcePath.slice(0, sourcePath.lastIndexOf('/') + 1);
-  const href = 'file://' + dir.split('/').map(encodeURIComponent).join('/');
-  return html.replace(/<head(\s[^>]*)?>/i, (m) => m + '<base href="' + href + '">');
+  const sourceUrl = pathToFileURL(sourcePath).href;
+  const dirUrl = pathToFileURL(path.dirname(sourcePath) + path.sep).href;
+  const match = html.match(/<base\b[^>]*\bhref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i);
+  const raw = match ? (match[1] || match[2] || match[3] || '') : '';
+  let href = dirUrl;
+  if (raw) {
+    const decoded = raw.replace(/&amp;/gi, '&').replace(/&quot;/gi, '"').replace(/&#39;/gi, "'");
+    try { href = new URL(decoded, sourceUrl).href; } catch (e) { href = dirUrl; }
+  }
+  const escaped = href.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+  return html.replace(/<head(\s[^>]*)?>/i, (m) => m + '<base data-clay-render-base href="' + escaped + '">');
 }
 
 /* 导出 PDF —— 追求"最忠实展示"的整页长图,像素级还原用户在屏幕上看到的样子。
@@ -158,10 +262,11 @@ function injectBaseTag(html, sourcePath) {
  * 所以改成:CDP 全页截图(captureBeyondViewport,用的是屏幕布局,不受打印重排影响)
  * → 把整页图片包成一张等大的单页 PDF。代价是文字不可选,但对"发给人看"的展示场景
  * 反而是像素级忠实;需要可选文字/交接开发的走"复制整页代码"。 */
-ipcMain.handle('clay:export-pdf', async (_e, defaultName, html, width, sourcePath) => {
+ipcMain.handle('clay:export-pdf', async (_e, defaultName, html, width, height, sourcePath) => {
   // 渲染宽度跟着渲染进程里"当前选中的视图"走(桌面/平板/手机),不再固定死;
   // 传值异常(没传、非数)时退回旧的桌面默认宽度,兜底不出错。
   const shotWidth = Number.isFinite(width) && width > 0 ? Math.round(Math.min(width, 4000)) : 1280;
+  const shotHeight = Number.isFinite(height) && height > 0 ? Math.round(Math.min(height, 4000)) : 900;
   let filePath;
   if (process.env.CLAY_PDF_OUT) {
     // 测试接缝(同 CLAY_USERDATA 思路):跳过原生对话框,直接写到指定路径。env 不设时零影响。
@@ -184,7 +289,8 @@ ipcMain.handle('clay:export-pdf', async (_e, defaultName, html, width, sourcePat
     shotWin = new BrowserWindow({
       show: false,
       width: shotWidth,
-      height: 900,
+      height: shotHeight,
+      useContentSize: true,
       webPreferences: { javascript: true, contextIsolation: true, nodeIntegration: false },
     });
     /* 相对路径的图片/素材(AI 工具常见的"HTML + 图片文件夹"组合):这份 HTML 被写到
@@ -196,7 +302,9 @@ ipcMain.handle('clay:export-pdf', async (_e, defaultName, html, width, sourcePat
     fs.writeFileSync(tmpHtml, htmlToRender, 'utf8');
     await shotWin.loadFile(tmpHtml);
 
-    // 先滚一遍触发滚动渐显(opacity:0→显示),回顶;再关掉动画/过渡,避免截到中间态残影
+    // 先滚一遍触发滚动渐显(opacity:0→显示),回顶;再暂停当前动画帧。
+    // 不能通过改 CSS 来“稳定”页面:animation:none 会把元素重置到动画前,
+    // fixed/sticky→static 更会直接改变文档流,这是此前 PDF 和 Clay 明显错位的根因。
     const dim = await shotWin.webContents.executeJavaScript(`(async () => {
       const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
       const H = () => Math.max(document.documentElement.scrollHeight, document.body.scrollHeight, document.documentElement.offsetHeight);
@@ -210,19 +318,9 @@ ipcMain.handle('clay:export-pdf', async (_e, defaultName, html, width, sourcePat
       }));
       for (let y = 0; y <= H(); y += Math.max(240, innerHeight * 0.8)) { scrollTo(0, y); await sleep(50); }
       scrollTo(0, 0);
-      const s = document.createElement('style');
-      // 全页截图对 backdrop-filter(毛玻璃)有合成 bug:粘性导航的毛玻璃会采样到页面
-      // 别处(常是底部页脚)的内容,在顶部糊出一层文字残影。快照里导航背后本就没有可透视
-      // 的内容,去掉毛玻璃视觉无差别却能根治残影。顺带关掉动画/过渡,避免截到中间态。
-      s.textContent = '*,*::before,*::after { animation: none !important; transition: none !important;'
-        + ' backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }';
-      document.head.appendChild(s);
-      // sticky/fixed 也一并降成 static:快照没有滚动,固定定位只会造成重叠错位
-      document.querySelectorAll('*').forEach((el) => {
-        const p = getComputedStyle(el).position;
-        if (p === 'sticky' || p === 'fixed') el.style.position = 'static';
-      });
-      await sleep(200);
+      await sleep(250); // 让滚动触发的短过渡落到终态
+      try { document.getAnimations().forEach((a) => a.pause()); } catch (e) { /* 老页面无此 API */ }
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
       return { w: Math.max(document.documentElement.scrollWidth, document.body.scrollWidth, document.documentElement.clientWidth), h: H() };
     })()`);
 
@@ -241,7 +339,8 @@ ipcMain.handle('clay:export-pdf', async (_e, defaultName, html, width, sourcePat
     dbg.detach();
 
     // 把整页图片包成一张等大的单页 PDF(纯 <img>,没有 vh 可重排,必是单页)
-    wrapWin = new BrowserWindow({ show: false, width: w, height: Math.min(h, 900), webPreferences: { javascript: true } });
+    wrapWin = new BrowserWindow({ show: false, width: w, height: Math.min(h, 900), useContentSize: true,
+      webPreferences: { javascript: true } });
     const wrap = '<!doctype html><html><head><meta charset="utf-8"><style>'
       + '@page { size: ' + w + 'px ' + h + 'px; margin: 0; }'
       + '*{margin:0;padding:0} img{display:block;width:' + w + 'px;height:' + h + 'px}'
@@ -271,6 +370,9 @@ ipcMain.handle('clay:export-pdf', async (_e, defaultName, html, width, sourcePat
 });
 
 ipcMain.handle('clay:confirm', async (_e, opts) => {
+  if (process.env.CLAY_TEST_CONFIRM_RESPONSE !== undefined) {
+    return Number(process.env.CLAY_TEST_CONFIRM_RESPONSE);
+  }
   const { response } = await dialog.showMessageBox(win, {
     type: opts.type || 'question',
     buttons: opts.buttons,
@@ -281,6 +383,21 @@ ipcMain.handle('clay:confirm', async (_e, opts) => {
   });
   return response;
 });
+
+ipcMain.on('clay:close-result', (event, shouldClose) => {
+  if (!win || event.sender !== win.webContents || !closeRequestPending) return;
+  closeRequestPending = false;
+  if (!shouldClose) return;
+  closeApproved = true;
+  win.close();
+});
+
+// 只有隔离用户数据的打包回归才开启:从主进程发起和红灯/⌘Q 同路的关窗。
+if (process.env.CLAY_TEST_CLOSE) {
+  ipcMain.on('clay:test-close-window', (event) => {
+    if (win && event.sender === win.webContents) win.close();
+  });
+}
 
 /* 最近文件用:过滤出仍然存在的路径(删除/移动的会被剔除,主页据此不显示) */
 ipcMain.handle('clay:filter-existing', async (_e, paths) => {
@@ -298,6 +415,51 @@ ipcMain.handle('clay:read-path', async (_e, filePath) => {
   } catch (err) {
     return null;
   }
+});
+
+/* 当前源文件监听。返回启动监听这一刻的内容,让“应用关闭期间文件已被 AI 改过”
+ * 也能在用户重新点开标签页时立即被发现,而不是必须等下一次磁盘事件。 */
+ipcMain.handle('clay:watch-source', async (e, filePath) => {
+  stopSourceWatch();
+  if (!filePath || typeof filePath !== 'string') return { ok: false, error: '文件路径无效' };
+
+  const target = path.resolve(filePath);
+  const dir = path.dirname(target);
+  try {
+    const content = fs.readFileSync(target, 'utf8');
+    const sender = e.sender;
+    const watch = {
+      sender,
+      filePath: target,
+      fileName: path.basename(target).normalize('NFC'),
+      digest: contentDigest(content),
+      missing: false,
+      retrying: false,
+      timer: null,
+      watcher: null,
+    };
+    watch.watcher = fs.watch(dir, { persistent: false }, (_eventType, changedName) => {
+      if (sourceWatch !== watch) return;
+      if (changedName && String(changedName).normalize('NFC') !== watch.fileName) return;
+      scheduleWatchedSourceRead(watch);
+    });
+    watch.watcher.on('error', (err) => {
+      sendSourceChange(watch, { exists: null, error: String(err && err.message || err) });
+      stopSourceWatch(sender.id);
+    });
+    sourceWatch = watch;
+    return { ok: true, path: target, exists: true, content };
+  } catch (err) {
+    let exists = false;
+    try { exists = fs.statSync(target).isFile(); } catch (e2) { /* 确实不存在/不可读 */ }
+    // 区分“文件不存在”和“文件仍在但系统监听失败”,避免把权限/句柄问题误报成被删除。
+    return { ok: false, path: target, exists, error: String(err && err.message || err) };
+  }
+});
+
+ipcMain.handle('clay:unwatch-source', async (e) => {
+  stopSourceWatch(e.sender.id);
+  return { ok: true };
 });
 
 ipcMain.handle('clay:open-file', async () => {

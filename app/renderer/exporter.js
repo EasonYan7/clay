@@ -12,15 +12,6 @@
  * 副产品:导出结果对开发者更好读——上半是你原来的样式,下半是被改了什么。
  */
 (function () {
-  function indent(html) {
-    return html
-      .replace(/>(\s*)</g, '>\n<')
-      .split('\n')
-      .map((line) => line.trim())
-      .filter(Boolean)
-      .join('\n');
-  }
-
   // 画布里 Tailwind Play CDN 现场编译出的 CSS(特征:含 --tw- 变量且体量大)
   function extractTailwindCss(editor) {
     try {
@@ -37,8 +28,9 @@
   /* 从 getCss() 里只摘出 Clay 生成的规则。
    * 判据:选择器命中 #i+短 id(GrapesJS 给被改过的元素分配的 id)。
    * 顶层规则与 @media 块分别处理,媒体查询里的改动同样要带走。 */
-  function extractClayRules(editor) {
+  function extractClayRules(editor, baselineRules) {
     const CLAY_ID = /#i[a-z0-9]{3,}/;
+    const hasBaseline = baselineRules && typeof baselineRules === 'object';
     let cm;
     try { cm = editor.Css; } catch (e) { return ''; }
     const out = [];
@@ -46,10 +38,15 @@
 
     cm.getRules().forEach((rule) => {
       const sel = rule.selectorsToString ? rule.selectorsToString() : '';
-      if (!sel || !CLAY_ID.test(sel)) return;
+      if (!sel) return;
       const styleText = rule.styleToString ? rule.styleToString() : '';
       if (!styleText.trim()) return;
       const at = rule.get('mediaText');
+      const key = (at || '') + '\u241f' + sel;
+      const normalized = styleText.replace(/\s+/g, ' ').trim();
+      // 新文档按“当前规则 vs 导入基线”识别 Clay 改动,所以作者原本带 id 的
+      // 元素也不会漏。老工作区没有基线,继续使用历史 #iXXX 判据。
+      if (hasBaseline ? baselineRules[key] === normalized : !CLAY_ID.test(sel)) return;
       const line = sel + '{' + styleText + '}';
       if (at) {
         (media[at] = media[at] || []).push(line);
@@ -65,53 +62,98 @@
     return css.trim();
   }
 
+  function escapeAttr(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;')
+      .replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  function attrsToString(attrs) {
+    return Object.keys(attrs || {}).map((name) => {
+      const value = attrs[name];
+      return value === '' ? ' ' + name : ' ' + name + '="' + escapeAttr(value) + '"';
+    }).join('');
+  }
+
+  function restoreBodyScripts(html, scripts) {
+    const used = {};
+    const list = scripts || [];
+    const marker = /<template\b[^>]*\bdata-clay-script=(?:"(\d+)"|'(\d+)'|(\d+))[^>]*>(?:\s*<\/template>)?/gi;
+    let out = html.replace(marker, (_all, a, b, c) => {
+      const i = Number(a || b || c);
+      if (!Number.isInteger(i) || !list[i]) return '';
+      used[i] = true;
+      return list[i];
+    });
+    // 极老的 GrapesJS 工程或手工编辑可能吞掉 template 标记。脚本宁可退回 body
+    // 末尾也不能彻底消失,否则导出的按钮/图表会变成死页面。
+    const orphan = list.filter((_s, i) => !used[i]);
+    if (orphan.length) out = out.replace(/<\/body>\s*$/i, '') + '\n' + orphan.join('\n') + '\n</body>';
+    return out;
+  }
+
+  function hasTailwindRuntime(nodes) {
+    return (nodes || []).some((n) => n && n.tag === 'script' && /tailwindcss/i.test(n.html || ''));
+  }
+
   function build(editor, doc) {
     const isTailwind = doc.isTailwind;
-    const bodyHtml = editor.getHtml();
-    const clayCss = extractClayRules(editor);
+    let bodyHtml = editor.getHtml();
+    const clayCss = extractClayRules(editor, doc.baselineRules);
     const originalCss = (doc.styleText || '').trim();
+    const structured = doc.fidelityVersion >= 2 && Array.isArray(doc.headNodes);
+    if (structured) bodyHtml = restoreBodyScripts(bodyHtml, doc.bodyScripts);
 
     let twBlock = '';
     let usedCdnFallback = false;
-    if (isTailwind) {
+    /* 新导入的页面若本来就带 Tailwind runtime,保留原节点与版本/配置顺序才是最忠实的。
+     * 只有作者没带 runtime 时才沿用旧策略:从画布静态提取,提取不到再回退 CDN。 */
+    if (isTailwind && !(structured && hasTailwindRuntime(doc.headNodes))) {
       const twCss = extractTailwindCss(editor);
       if (twCss) {
-        twBlock = '\n  <style>\n/* Tailwind(静态提取,离线可用) */\n' + twCss + '\n  </style>';
+        twBlock = '  <style>\n/* Tailwind(静态提取,离线可用) */\n' + twCss + '\n  </style>';
       } else {
-        twBlock = '\n  <script src="https://cdn.tailwindcss.com"></script>';
+        twBlock = '  <script src="https://cdn.tailwindcss.com"></script>';
         usedCdnFallback = true;
       }
     }
 
-    const styleBlocks = [];
-    if (originalCss) {
-      styleBlocks.push('  <style>\n/* 原始样式 */\n' + originalCss + '\n  </style>');
+    const headBlocks = [];
+    if (structured) {
+      // style/link/script/base/meta 的相对顺序本身就是页面语义,逐节点原样还原。
+      (doc.headNodes || []).forEach((n) => { if (n && n.html) headBlocks.push('  ' + n.html); });
+    } else if (originalCss) {
+      // 老工作区没有结构化 head,保持向后兼容。
+      headBlocks.push('  <style>\n/* 原始样式 */\n' + originalCss + '\n  </style>');
+      const metaLines = (doc.headMeta || []).concat(doc.headLinks || []);
+      metaLines.forEach((m) => headBlocks.push('  ' + m));
     }
+    if (twBlock) headBlocks.push(twBlock);
     if (clayCss) {
-      styleBlocks.push('  <style>\n/* Clay 中调整的部分 */\n' + clayCss + '\n  </style>');
+      headBlocks.push('  <style>\n/* Clay 中调整的部分 */\n' + clayCss + '\n  </style>');
     }
 
     const title = doc.docTitle || doc.name || 'Untitled';
-    const metaLines = (doc.headMeta || []).concat(doc.headLinks || [])
-      .map((m) => '  ' + m).join('\n');
-
-    const scriptBlock = (doc.scripts || [])
-      .map((s) => s.src
-        ? '<script src="' + s.src + '"></script>'
-        : '<script>\n' + s.content + '\n</script>')
+    const viewport = structured ? doc.viewport : 'width=device-width, initial-scale=1.0';
+    const htmlAttrs = structured ? attrsToString(doc.htmlAttrs) : ' lang="zh"';
+    const legacyScripts = structured ? '' : (doc.scripts || [])
+      .map((s) => s.html || (s.src
+        ? '<script src="' + escapeAttr(s.src) + '"></script>'
+        : '<script>\n' + s.content + '\n</script>'))
       .join('\n');
 
-    const html = '<!DOCTYPE html>\n<html lang="zh">\n<head>\n' +
+    // getHtml() 带 <body> 包装。不要再 trim/逐行缩进:那会改坏 pre/textarea
+    // 等空白敏感内容,造成导出后排版与画布不同。
+    let body = bodyHtml;
+    if (!/^\s*<body\b/i.test(body)) body = '<body>' + body + '</body>';
+    if (legacyScripts) body = body.replace(/<\/body>\s*$/i, '') + '\n' + legacyScripts + '\n</body>';
+
+    const html = '<!DOCTYPE html>\n<html' + htmlAttrs + '>\n<head>\n' +
       '  <meta charset="UTF-8">\n' +
-      '  <meta name="viewport" content="width=device-width, initial-scale=1.0">\n' +
+      (viewport ? '  <meta name="viewport" content="' + escapeAttr(viewport) + '">\n' : '') +
       '  <title>' + escapeHtml(title) + '</title>\n' +
-      (metaLines ? metaLines + '\n' : '') +
-      (twBlock ? twBlock.replace(/^\n/, '') + '\n' : '') +
-      (styleBlocks.length ? styleBlocks.join('\n') + '\n' : '') +
+      (headBlocks.length ? headBlocks.join('\n') + '\n' : '') +
       '</head>\n' +
-      indent(bodyHtml).replace(/<\/body>$/, '') +
-      (scriptBlock ? '\n' + scriptBlock + '\n' : '\n') +
-      '</body>\n</html>';
+      body + '\n</html>';
 
     return { code: html, usedCdnFallback };
   }
@@ -139,5 +181,5 @@
     return parts.join(' ');
   }
 
-  window.ClayExporter = { build, exportNote };
+  window.ClayExporter = { build, exportNote, extractClayRules };
 })();

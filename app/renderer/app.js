@@ -64,11 +64,46 @@
    * 主页在"用过编辑"后用它显示最近记录;源文件删/移则渲染时过滤掉不显示。 */
   let recents = [];
   const RECENTS_MAX = 9;
+  let sourceWatchSeq = 0;       // 切页竞态:只接受最后一次 watch 请求的初始快照
+  let sourceChangeBusy = false;
+  let pendingSourceChange = null;
+  let closePromptBusy = false;
+
+  /* 产品约定:正常退出就是结束本轮会话,下次只回主页,不恢复任何标签。
+   * 运行中仍持续保存 docs,并用 sessionOpen 标记“这轮尚未正常收尾”:只有崩溃/强杀后才恢复。
+   * closed=true 用在用户已经确认退出时,明确清空本轮标签和未保存恢复稿。 */
+  function workspaceJson(closed) {
+    return JSON.stringify({
+      docs: closed ? [] : docs,
+      activeDocId: null,
+      docSeq,
+      recents,
+      sessionOpen: !closed,
+    });
+  }
+
+  let cleanExitCommitted = false;
+
+  /* 在批准关窗之前同步写入“会话已结束”。不能只异步 persist 后立刻关窗:
+   * beforeunload 或尚在路上的自动保存可能把旧 docs 再写回来,造成下次又出现紫点和退出提示。 */
+  function commitClosedWorkspace() {
+    if (!restored) return false;
+    clearTimeout(persistTimer);
+    const json = workspaceJson(true);
+    let ok = false;
+    if (window.clay && window.clay.saveWorkspaceSync) ok = !!window.clay.saveWorkspaceSync(json);
+    else {
+      try { localStorage.setItem(STORE_KEY, json); ok = true; } catch (e) { ok = false; }
+    }
+    cleanExitCommitted = ok;
+    if (!ok) toast('退出状态保存失败,已留在 Clay');
+    return ok;
+  }
 
   async function persist() {
     if (!restored) return;      // 没读完不许写,宁可不存也不能覆盖
     snapshotActive();
-    const json = JSON.stringify({ docs, activeDocId, docSeq, recents });
+    const json = workspaceJson();
     if (hasDisk) {
       const r = await window.clay.saveWorkspace(json);
       if (!r || !r.ok) {
@@ -102,20 +137,24 @@
 
     if (saved && Array.isArray(saved.recents)) recents = saved.recents.slice(0, RECENTS_MAX);
 
-    if (!saved || !saved.docs || !saved.docs.length) {
-      restored = true;          // 确认过磁盘上本来就是空的,之后可以正常保存
+    const savedDocs = saved && Array.isArray(saved.docs) ? saved.docs : [];
+    // 旧版本没有 sessionOpen,它留下的 docs 可能正是“直接退出”后的废弃恢复稿。
+    // 从本版本起只有明确标为运行中、随后异常中断的会话才允许恢复。
+    const shouldRecover = !!(saved && saved.sessionOpen === true && savedDocs.length);
+    if (!recents.length) savedDocs.forEach((d) => { if (d.sourcePath) addRecent(d.sourcePath, d.name); });
+
+    if (!shouldRecover) {
+      restored = true;          // 正常收尾或旧版遗留会话都从空标签开始,之后可以正常保存
       renderHome();             // 可能有最近记录 → 渲染最近区;没有则手绘引导页
       return false;
     }
-    saved.docs.forEach((d) => docs.push(d));
+    savedDocs.forEach((d) => docs.push(d));
     docSeq = saved.docSeq || docs.length;
-    // 这个功能上线前的老工作区没有 recents:用已打开的文件文档补种,老用户也能立刻看到最近区
-    if (!recents.length) docs.forEach((d) => { if (d.sourcePath) addRecent(d.sourcePath, d.name); });
     restored = true;            // 数据已进内存,现在保存才是安全的
     renderTabs();
-    const target = docs.find((x) => x.id === saved.activeDocId) || docs[0];
-    activateDoc(target.id);
-    toast('已恢复上次的工作区(' + docs.length + ' 个页面)');
+    // 冷启动永远落主页。文档工程仍保留在标签页里、最近文件仍显示在主页,
+    // 只是不要替用户擅自重开上次那一页;点标签后才真正载入编辑器。
+    goHome();
     return true;
   }
 
@@ -372,6 +411,30 @@
   ];
 
   /* ── 编辑器创建/重建 ─────────────────────── */
+  function enableEditableTableCells(ed) {
+    const cells = ed.DomComponents;
+    const previous = cells.getType('cell');
+    const previousDefaults = previous && previous.model && previous.model.prototype.defaults;
+
+    /* GrapesJS 内置的 cell 继承普通容器:能选中和改样式,但没有 TextView 的双击富文本能力。
+     * 保留原 cell 的表格结构约束,只把模型/视图改为继承 text;旧工作区里已经保存为 type=cell
+     * 的单元格也会在重新载入时自动获得编辑能力。 */
+    cells.addType('cell', {
+      extend: 'text',
+      isComponent(el) {
+        const tag = String(el && el.tagName || '').toLowerCase();
+        return tag === 'td' || tag === 'th';
+      },
+      model: {
+        defaults: Object.assign({}, previousDefaults || {}, {
+          type: 'cell',
+          tagName: 'td',
+          editable: true,
+        }),
+      },
+    });
+  }
+
   function ensureEditor(tailwind) {
     if (editor && canvasTailwind === tailwind) return editor;
     if (editor) {
@@ -404,6 +467,7 @@
       // 补一套精选常用色板 + 记住最近用过的颜色 + 中文按钮 + 可清空。
       colorPicker: CLAY_COLOR_PICKER,
     });
+    enableEditableTableCells(editor);
     wireEditorEvents(editor);
     window.__clayEditor = editor; // 调试句柄
     return editor;
@@ -414,35 +478,108 @@
    * iframe,不带这个基准,同样的相对路径会解析错位,图裂成"未找到"占位符。
    * 修法:给 iframe 的 <head> 插一个指回源文件目录的 <base>,相对路径就能按浏览器里
    * 同样的方式解析。没有源文件(粘贴导入)时清空,不装错的。 */
-  function applyCanvasBase(doc, sourcePath) {
+  function fileDirHref(sourcePath) {
+    if (!sourcePath) return '';
+    const dir = sourcePath.slice(0, sourcePath.lastIndexOf('/') + 1);
+    return 'file://' + dir.split('/').map(encodeURIComponent).join('/');
+  }
+
+  function applyCanvasBase(doc, sourcePath, authoredBase) {
     const old = doc.getElementById('clay-base');
     if (old) old.remove();
-    if (!sourcePath) return;
-    const dir = sourcePath.slice(0, sourcePath.lastIndexOf('/') + 1);
-    const href = 'file://' + dir.split('/').map(encodeURIComponent).join('/');
+    const sourceBase = fileDirHref(sourcePath);
+    let href = sourceBase;
+    if (authoredBase) {
+      try { href = new URL(authoredBase, sourceBase || doc.baseURI).href; }
+      catch (e) { href = authoredBase; }
+    }
+    if (!href) return;
     const base = doc.createElement('base');
     base.id = 'clay-base';
     base.href = href;
     doc.head.insertBefore(base, doc.head.firstChild);
   }
 
-  /* 画布保真:把原始 CSS 原文补进画布 iframe 的 <head> 末尾。
+  /* 画布保真:把原始 style/link 按原顺序补进画布 iframe 的 <head> 末尾。
    * 起因:GrapesJS 的 CSS 解析器会丢弃任何值里含 var() 的声明(实测复现——
    * `.hero { background: …, linear-gradient(…, var(--navy) …) }` 整条 background 被扔,
    * 画布里 hero 变透明、透出浅色 body,而 :root 的变量定义留着却没人引用得到)。
-   * 后果只在编辑画布里:导出走的是原文(exporter 用 doc.styleText),颜色本来就是对的。
+   * 同时 GrapesJS 根本不会替我们保留外链样式表、style 的 media 属性和 html 属性;
+   * Google Fonts、图标字体、html[data-theme] 因此都会和浏览器原件不同。
    * 为了让"编辑时看到的"和"导出/浏览器里的"一致,这里把原文作为只读 <style> 追加到
    * <head> 末尾——它排在 GrapesJS 解析后的样式之后,同权重时原文获胜,var() 规则得以
    * 正常渲染;用户在面板上的改动走 #id 规则(优先级更高)照常覆盖,不受影响。
    * 只影响画布显示:不进组件模型、不进撤销栈、不进导出。id 固定,切文档时整块换成当前页的原文。 */
-  function applyCanvasFidelityCss(doc, styleText) {
-    const old = doc.getElementById('clay-fidelity');
+  function applyCanvasFidelityHead(doc, page) {
+    const source = (page.headNodes || []).filter((n) => {
+      if (!n || !n.html) return false;
+      if (n.tag === 'style') return true;
+      if (n.tag !== 'link') return false;
+      const holder = doc.createElement('template');
+      holder.innerHTML = n.html.trim();
+      const link = holder.content.firstElementChild;
+      return !!(link && /(^|\s)stylesheet(\s|$)/i.test(link.getAttribute('rel') || ''));
+    });
+    const signature = JSON.stringify(source);
+    const existing = [...doc.querySelectorAll('[data-clay-fidelity]')];
+    if (doc.documentElement.__clayFidelitySignature === signature && existing.length === source.length) return;
+    existing.forEach((n) => n.remove());
+    delete doc.documentElement.__clayFidelitySignature;
+
+    /* GrapesJS 把 CssComposer 的 <style> 放在 body 尾部的内部容器里,不是 head。
+     * 原件若仍 append 到 head,解析后的重复规则会在 DOM 顺序上反压原件,外链样式
+     * 也无法保持原 cascade。放到 body 最末才真的满足“解析结果 < 原件”。 */
+    const mount = doc.body || doc.head;
+
+    if (source.length) {
+      source.forEach((saved) => {
+        const holder = doc.createElement('template');
+        holder.innerHTML = saved.html.trim();
+        const node = holder.content.firstElementChild;
+        if (!node) return;
+        node.setAttribute('data-clay-fidelity', '');
+        mount.appendChild(node);
+      });
+    } else if (page.styleText && page.styleText.trim()) {
+      // 老工作区没有 headNodes,继续走旧字段,不能升级后突然变裸页。
+      const style = doc.createElement('style');
+      style.setAttribute('data-clay-fidelity', '');
+      style.textContent = page.styleText;
+      mount.appendChild(style);
+    }
+    doc.documentElement.__clayFidelitySignature = signature;
+  }
+
+  function applyCanvasHtmlAttrs(doc, attrs) {
+    const root = doc.documentElement;
+    const previous = root.__clayHtmlAttrs || [];
+    previous.forEach((name) => root.removeAttribute(name));
+    const names = Object.keys(attrs || {});
+    names.forEach((name) => root.setAttribute(name, attrs[name]));
+    root.__clayHtmlAttrs = names;
+  }
+
+  function applyCanvasClayOverrides(doc, ed, page) {
+    const old = doc.getElementById('clay-overrides');
     if (old) old.remove();
-    if (!styleText || !styleText.trim()) return;
+    if (!(window.ClayExporter && window.ClayExporter.extractClayRules)) return;
+    const css = window.ClayExporter.extractClayRules(ed, page.baselineRules);
+    if (!css) return;
     const style = doc.createElement('style');
-    style.id = 'clay-fidelity';
-    style.textContent = styleText;
-    doc.head.appendChild(style);   // 末尾:压过 GrapesJS 解析后(丢了 var())的同名规则
+    style.id = 'clay-overrides';
+    style.textContent = css;
+    // 作者原始 CSS 必须在 Grapes 的有损解析结果之后,才能补回 var() 等规则;
+    // Clay 改动再单独放到最末,保证同权重的作者 #id 也压不住用户刚做的调整。
+    (doc.body || doc.head).appendChild(style);
+  }
+
+  function applyCanvasTailwindConfig(doc, page) {
+    if (!page.tailwindConfig || !doc.defaultView || !doc.defaultView.tailwind) return;
+    const signature = JSON.stringify(page.tailwindConfig);
+    if (doc.documentElement.__clayTailwindConfigSignature === signature) return;
+    // importer 只会产出纯 JSON 数据;再 clone 一次,避免 Tailwind 的 Proxy 改写工作区对象。
+    doc.defaultView.tailwind.config = JSON.parse(signature);
+    doc.documentElement.__clayTailwindConfigSignature = signature;
   }
 
   /* 插入 base 这件事不跟 GrapesJS 的渲染时机打游击 —— 实测踩过两次坑:
@@ -459,8 +596,11 @@
     try {
       const doc = ed.Canvas.getDocument();
       if (doc && doc.head) {
-        applyCanvasBase(doc, d.sourcePath);              // 幂等:href 没变就不动
-        applyCanvasFidelityCss(doc, d.styleText);        // 补回 var() 等被 GrapesJS 丢掉的原始样式
+        applyCanvasBase(doc, d.sourcePath, d.baseHref);  // 相对资源与作者自己的 <base> 均按原件解析
+        applyCanvasHtmlAttrs(doc, d.htmlAttrs);          // html.dark / data-theme / dir / lang
+        applyCanvasFidelityHead(doc, d);                 // 外链字体、style media、var() 原始规则
+        applyCanvasClayOverrides(doc, ed, d);            // 最终级联顺序:解析结果 < 原件 < Clay 调整
+        applyCanvasTailwindConfig(doc, d);               // 仅应用安全解析出的纯数据 Tailwind config
       }
       const wrapper = ed.getWrapper();
       if (!wrapper) return;
@@ -544,6 +684,9 @@
     ed.on('component:selected', scheduleComputed);
     ed.on('component:deselected', scheduleComputed);
     ed.on('component:styleUpdate', scheduleComputed);
+    ed.on('component:styleUpdate', () => {
+      if (ed === editor && activeDocId) healCanvas(ed, activeDocId);
+    });
     ed.on('update', schedulePersist);   // 任何修改后自动保存
     /* 撤销栈进出 → 重算历史并决定要不要标脏。
      * 关键:componentFirst 模式下"选中元素"会顺手建一条空占位规则,这也会进撤销栈,
@@ -608,8 +751,9 @@
     return '文本';
   }
 
-  /* 自研吸附拖拽:按住已选元素直接拖动,紫色指示线提示落点,
-   * 松手时通过 component.move() 换位(保持 DOM 结构干净,不产生绝对定位) */
+  /* 自研吸附拖拽:按住元素直接拖动,紫色指示线提示落点,
+   * 松手时通过 component.move() 换位(保持 DOM 结构干净,不产生绝对定位)。
+   * 不用鼠标事件裸跑:指针捕获能保证快速拖出 iframe 边界后仍收得到松手。 */
   function enableDirectDrag(ed) {
     const bind = () => {
       const cdoc = ed.Canvas.getDocument();
@@ -645,93 +789,252 @@
         return false;
       };
 
-      // 找落点:指针下最近的可作为"兄弟"的组件 + 前/后
-      // 注:用 e.target 而非 elementFromPoint(画布 iframe 的 viewport 尺寸不可靠)
+      const compFromElement = (el, elMap) => {
+        while (el && el !== cdoc.body && !elMap.has(el)) el = el.parentElement;
+        return el && el !== cdoc.body ? elMap.get(el) : null;
+      };
+
+      const depthOf = (comp) => {
+        let depth = 0;
+        for (let p = comp; p && p.parent && p.parent(); p = p.parent()) depth++;
+        return depth;
+      };
+
+      const classSig = (comp) => ((comp.getClasses && comp.getClasses()) || []).slice().sort().join(' ');
+
+      const nearestDirectChild = (parent, source, x, y) => {
+        if (!parent || !parent.components) return null;
+        let nearest = null;
+        let nearestDistance = Infinity;
+        parent.components().forEach((candidate) => {
+          if (candidate === source) return;
+          const el = candidate.getEl && candidate.getEl();
+          if (!el) return;
+          const r = el.getBoundingClientRect();
+          if (!r.width && !r.height) return;
+          const dx = x < r.left ? r.left - x : (x > r.right ? x - r.right : 0);
+          const dy = y < r.top ? r.top - y : (y > r.bottom ? y - r.bottom : 0);
+          const distance = dx * dx + dy * dy;
+          if (distance < nearestDistance) {
+            nearest = candidate;
+            nearestDistance = distance;
+          }
+        });
+        return nearest;
+      };
+
+      // 鼠标压在卡片里的标题/图标上时,人的意图通常仍是给"卡片"换位,
+      // 不是把整张卡片塞进那个标题的父容器。优先找当前父容器的直接兄弟;
+      // 跨容器时再用 class/标签/树深度找最像的结构层。
+      const chooseTarget = (hovered, source) => {
+        const candidates = [];
+        for (let c = hovered; c && c !== ed.getWrapper(); c = c.parent && c.parent()) {
+          if (c === source || isDescendant(c, source)) return null;
+          const parent = c.parent && c.parent();
+          if (!parent) continue;
+          let allowed = true;
+          try { allowed = !!ed.Components.canMove(parent, source).result; }
+          catch (e) { allowed = source.get('draggable') !== false && parent.get('droppable') !== false; }
+          if (allowed) candidates.push(c);
+        }
+        if (!candidates.length) return null;
+        const sameParent = candidates.find((c) => c.parent() === source.parent());
+        if (sameParent) return sameParent;
+
+        const sourceClass = classSig(source);
+        const sourceTag = (source.get('tagName') || '').toLowerCase();
+        if (sourceClass) {
+          const sameClass = candidates.find((c) =>
+            (c.get('tagName') || '').toLowerCase() === sourceTag && classSig(c) === sourceClass);
+          if (sameClass) return sameClass;
+        }
+        const sameTag = candidates.filter((c) => (c.get('tagName') || '').toLowerCase() === sourceTag);
+        if (sameTag.length) {
+          const sourceDepth = depthOf(source);
+          sameTag.sort((a, b) => Math.abs(depthOf(a) - sourceDepth) - Math.abs(depthOf(b) - sourceDepth));
+          return sameTag[0];
+        }
+        return candidates[0];
+      };
+
+      const layoutOf = (parent, target) => {
+        const pEl = parent && parent.getEl && parent.getEl();
+        const targetEl = target && target.getEl && target.getEl();
+        const cs = pEl && cdoc.defaultView.getComputedStyle(pEl);
+        const display = cs ? cs.display : '';
+        const flexDir = cs ? cs.flexDirection || '' : '';
+        let horizontal = false;
+        let reverse = false;
+
+        if (display === 'flex' || display === 'inline-flex') {
+          horizontal = /^row/.test(flexDir);
+          reverse = /-reverse$/.test(flexDir);
+        } else if (pEl && targetEl) {
+          // grid 不一定是横排:手机断点常会变成单列。用真实兄弟几何关系判定,
+          // 同时兼容 inline-block/float 这类 display 本身看不出横排的旧页面。
+          const tr = targetEl.getBoundingClientRect();
+          const siblings = parent.components ? parent.components() : [];
+          horizontal = siblings.some((c) => {
+            if (c === target) return false;
+            const el = c.getEl && c.getEl();
+            if (!el) return false;
+            const r = el.getBoundingClientRect();
+            const overlap = Math.min(tr.bottom, r.bottom) - Math.max(tr.top, r.top);
+            return overlap > Math.min(tr.height, r.height) * 0.45;
+          });
+        }
+        if (horizontal && cs && cs.direction === 'rtl') reverse = !reverse;
+        return { horizontal, reverse };
+      };
+
+      // 找落点:用 elementsFromPoint 重新命中指针下的真实元素。拖拽时已做 pointer
+      // capture,e.target 会始终是按下的旧元素,再用它就会永远算错落点。
       const resolveDrop = (e) => {
-        let el = e.target && e.target.nodeType === 1 ? e.target : null;
-        while (el && el !== cdoc.body && !drag.elMap.has(el)) el = el.parentElement;
-        if (!el || el === cdoc.body) return null;
-        let target = drag.elMap.get(el);
-        if (target === drag.comp || isDescendant(target, drag.comp)) return null;
-        if (!target.parent || !target.parent()) return null;
-        const r = el.getBoundingClientRect();
-        const pEl = el.parentElement;
-        // flex-direction 的 computed 值对普通 block 容器也默认是 'row',不能直接拿它判横排 ——
-        // 否则竖直堆叠的 block 子元素会被误当成横排,插入线画成竖线、还按 X 坐标判前后。
-        // 只有真的是 flex 容器才信 flex-direction;grid 视为横排;其余一律按竖排。
-        const disp = pEl ? cdoc.defaultView.getComputedStyle(pEl).display : '';
-        const horizontal = disp === 'grid'
-          || ((disp === 'flex' || disp === 'inline-flex')
-              && /^row/.test(cdoc.defaultView.getComputedStyle(pEl).flexDirection || ''));
-        const after = horizontal
-          ? e.clientX > r.x + r.width / 2
-          : e.clientY > r.y + r.height / 2;
-        return { target, after, rect: r, horizontal };
+        if (e.clientX < 0 || e.clientY < 0
+          || e.clientX > cdoc.documentElement.clientWidth || e.clientY > cdoc.documentElement.clientHeight) {
+          return undefined; // 指针捕获后出了 iframe:保留最后一个有效落点
+        }
+        const sr = drag.sourceRect;
+        if (sr && e.clientX >= sr.left && e.clientX <= sr.right
+          && e.clientY >= sr.top && e.clientY <= sr.bottom) return null;
+
+        const currentParent = drag.comp.parent();
+        const currentParentEl = currentParent && currentParent.getEl && currentParent.getEl();
+        const pr = currentParentEl && currentParentEl.getBoundingClientRect();
+        const insideCurrentParent = pr && e.clientX >= pr.left && e.clientX <= pr.right
+          && e.clientY >= pr.top && e.clientY <= pr.bottom;
+
+        let target = insideCurrentParent
+          ? nearestDirectChild(currentParent, drag.comp, e.clientX, e.clientY)
+          : null;
+        if (!target) {
+          let hovered = null;
+          const stack = cdoc.elementsFromPoint ? cdoc.elementsFromPoint(e.clientX, e.clientY) : [e.target];
+          for (let i = 0; i < stack.length && !hovered; i++) hovered = compFromElement(stack[i], drag.elMap);
+          if (!hovered) return null;
+          target = chooseTarget(hovered, drag.comp);
+        }
+        if (!target) return null;
+        const parent = target.parent();
+        const el = target.getEl && target.getEl();
+        if (!parent || !el) return null;
+        const rect = el.getBoundingClientRect();
+        const layout = layoutOf(parent, target);
+        const visualAfter = layout.horizontal
+          ? e.clientX > rect.left + rect.width / 2
+          : e.clientY > rect.top + rect.height / 2;
+        const after = layout.reverse ? !visualAfter : visualAfter;
+        const at = parent.components().indexOf(target) + (after ? 1 : 0);
+        const currentIndex = currentParent && currentParent.components().indexOf(drag.comp);
+        const finalIndex = currentParent === parent && currentIndex < at ? at - 1 : at;
+        if (currentParent === parent && finalIndex === currentIndex) return null; // 别显示“移了但没动”的假落点
+        return { target, parent, at, after, visualAfter, rect, horizontal: layout.horizontal };
       };
 
       const drawLine = (drop) => {
         const l = ensureLine();
         if (!drop) { l.style.display = 'none'; return; }
-        const { rect, after, horizontal } = drop;
+        const { rect, visualAfter, horizontal } = drop;
         l.style.display = 'block';
         if (horizontal) {
           l.style.width = '3px';
           l.style.height = rect.height + 'px';
           l.style.top = rect.y + 'px';
-          l.style.left = (after ? rect.x + rect.width : rect.x) - 1.5 + 'px';
+          l.style.left = (visualAfter ? rect.x + rect.width : rect.x) - 1.5 + 'px';
         } else {
           l.style.height = '3px';
           l.style.width = rect.width + 'px';
           l.style.left = rect.x + 'px';
-          l.style.top = (after ? rect.y + rect.height : rect.y) - 1.5 + 'px';
+          l.style.top = (visualAfter ? rect.y + rect.height : rect.y) - 1.5 + 'px';
         }
       };
 
       const endDrag = (commit) => {
-        if (!drag) return;
-        if (commit && drag.drop) {
-          const { target, after } = drag.drop;
-          const parent = target.parent();
-          const at = parent.components().indexOf(target) + (after ? 1 : 0);
-          drag.comp.move(parent, { at }); // move() 的 at 采用移动前的原始索引语义
-          toast('已移动「' + drag.comp.getName() + '」');
+        const active = drag;
+        if (active && commit && active.drop) {
+          active.comp.move(active.drop.parent, { at: active.drop.at }); // at 采用移动前的原始索引语义
+          toast('已移动「' + active.comp.getName() + '」');
         }
         drawLine(null);
-        cdoc.body.style.userSelect = '';
+        if (active) {
+          cdoc.body.style.userSelect = active.bodyUserSelect;
+          if (active.sourceEl) active.sourceEl.style.pointerEvents = active.sourcePointerEvents;
+        }
+        const captureEl = (active && active.captureEl) || (start && start.captureEl);
+        const pointerId = (active && active.pointerId) ?? (start && start.pointerId);
+        if (captureEl && pointerId !== null && pointerId !== undefined
+          && captureEl.hasPointerCapture && captureEl.hasPointerCapture(pointerId)) {
+          try { captureEl.releasePointerCapture(pointerId); } catch (e) { /* 已自动释放 */ }
+        }
         drag = null;
+        start = null;
+        dbg.dragOn = false;
       };
 
       const dbg = (window.__clayDragDbg = { down: '-', move: 0, dragOn: false });
-      cdoc.addEventListener('mousedown', (e) => {
-        start = null;
-        if (e.button !== 0) return (dbg.down = 'button');
-        const sel = ed.getSelected();
-        if (!sel || sel === ed.getWrapper()) return (dbg.down = 'no-sel');
-        const el = sel.getEl();
-        if (!el || !el.contains(e.target)) return (dbg.down = 'outside');
-        if (el.getAttribute('contenteditable') === 'true') return (dbg.down = 'rte');
-        start = { x: e.clientX, y: e.clientY, comp: sel };
+      cdoc.addEventListener('pointerdown', (e) => {
+        if (drag || start) endDrag(false);
+        if (e.button !== 0 || e.isPrimary === false) return (dbg.down = 'button');
+        const rawTarget = e.target;
+        const targetEl = rawTarget && (rawTarget.nodeType === 1 ? rawTarget : rawTarget.parentElement);
+        if (!targetEl) return (dbg.down = 'outside');
+        const editing = targetEl.closest && targetEl.closest('[contenteditable="true"]');
+        if (editing) return (dbg.down = 'rte');
+
+        const elMap = mapEls();
+        const clicked = compFromElement(targetEl, elMap);
+        const selected = ed.getSelected();
+        const selectedEl = selected && selected.getEl && selected.getEl();
+        // 已选卡片内按到文字仍拖整卡;直接拖未选元素也能一次启动,不再必须先点一下。
+        const comp = selected && selected !== ed.getWrapper() && selectedEl && selectedEl.contains(targetEl)
+          ? selected : clicked;
+        if (!comp || comp === ed.getWrapper() || comp.get('draggable') === false) return (dbg.down = 'no-source');
+        const sourceEl = comp.getEl && comp.getEl();
+        if (!sourceEl) return (dbg.down = 'outside');
+        if (comp !== selected) ed.select(comp);
+
+        const captureEl = targetEl;
+        try { captureEl.setPointerCapture(e.pointerId); } catch (err) { /* 旧引擎仍可在 iframe 内拖 */ }
+        start = { x: e.clientX, y: e.clientY, comp, sourceEl, captureEl, pointerId: e.pointerId };
         dbg.down = 'armed';
       });
 
-      cdoc.addEventListener('mousemove', (e) => {
+      cdoc.addEventListener('pointermove', (e) => {
         dbg.move++;
+        if ((start && e.pointerId !== start.pointerId) || (drag && e.pointerId !== drag.pointerId)) return;
         if (start && !drag) {
           if (Math.abs(e.clientX - start.x) + Math.abs(e.clientY - start.y) > 8) {
-            drag = { comp: start.comp, elMap: mapEls(), drop: null };
+            const sr = start.sourceEl.getBoundingClientRect();
+            drag = {
+              comp: start.comp, sourceEl: start.sourceEl, sourceRect: sr, elMap: mapEls(), drop: null,
+              captureEl: start.captureEl, pointerId: start.pointerId,
+              bodyUserSelect: cdoc.body.style.userSelect,
+              sourcePointerEvents: start.sourceEl.style.pointerEvents,
+            };
             cdoc.body.style.userSelect = 'none';
+            start.sourceEl.style.pointerEvents = 'none';
             start = null;
             dbg.dragOn = true;
           }
-          return;
         }
         if (!drag) return;
         e.preventDefault();
-        drag.drop = resolveDrop(e);
+        const next = resolveDrop(e);
+        if (next !== undefined) drag.drop = next;
         drawLine(drag.drop);
       });
 
-      cdoc.addEventListener('mouseup', () => { endDrag(true); start = null; });
+      cdoc.addEventListener('pointerup', (e) => {
+        if (drag && e.pointerId === drag.pointerId) {
+          const next = resolveDrop(e);
+          if (next !== undefined) drag.drop = next;
+          endDrag(true);
+        } else if (start && e.pointerId === start.pointerId) {
+          endDrag(false);
+        }
+      });
+      cdoc.addEventListener('pointercancel', () => endDrag(false));
+      cdoc.addEventListener('lostpointercapture', () => { if (drag || start) endDrag(false); });
       cdoc.addEventListener('keydown', (e) => { if (e.key === 'Escape') endDrag(false); });
       cdoc.defaultView.addEventListener('blur', () => endDrag(false));
     };
@@ -1016,7 +1319,7 @@
     docs.forEach((d) => {
       const tab = document.createElement('button');
       tab.className = 'doc-tab' + (d.id === activeDocId ? ' active' : '');
-      tab.title = d.name;
+      tab.title = d.name + (d.externalConflict ? ' — 外部文件已更新,Clay 修改尚未覆盖' : '');
       tab.dataset.id = d.id;
       tab.innerHTML = window.icon('file', 13) +
         '<span class="dt-name"></span>' +
@@ -1123,6 +1426,7 @@
     snapshotActive();
     if (editor) editor.select(null);
     activeDocId = null;
+    syncSourceWatch();
     $('#empty-state').hidden = false;
     // 没打开页面时属性面板是空的,收起来把画布让出来
     $('#sidebar').hidden = true;
@@ -1282,7 +1586,7 @@
   window.addEventListener('resize', () => { clearTimeout(drawSketch._t); drawSketch._t = setTimeout(drawSketch, 120); });
 
   function activateDoc(id) {
-    if (id === activeDocId) { showCanvas(); return; }
+    if (id === activeDocId) { showCanvas(); syncSourceWatch(); return; }
     snapshotActive();
     const d = docs.find((x) => x.id === id);
     if (!d) return;
@@ -1304,6 +1608,7 @@
     renderTabs();
     setDevice('desktop');
     syncThemeToPage(ed, d);   // 编辑器皮肤跟着这个页面的配色
+    syncSourceWatch();         // 监听当前源文件;初始快照也能发现 Clay 关闭期间的外部修改
   }
 
   async function closeDoc(id) {
@@ -1369,6 +1674,152 @@
     if (window.clay && window.clay.confirm) return window.clay.confirm(opts);
     // 浏览器里跑没有原生对话框;confirm 的"确定"对应按钮 1
     return window.confirm(opts.message + '\n\n' + (opts.detail || '')) ? 1 : 0;
+  }
+
+  /* ── 当前源文件的外部变更 ──────────────────
+   * 干净页面:自动载入磁盘新版本。
+   * Clay 内有未保存修改:绝不静默覆盖,让用户明确选择;若选择保留 Clay 版本,
+   * 冲突状态会一直留到另存为/明确覆盖源文件为止。 */
+  async function reloadActiveFromSource(d, raw) {
+    if (!d || d.id !== activeDocId || !raw) return false;
+    const device = (editor && editor.getDevice && editor.getDevice()) || 'desktop';
+    try {
+      const tw = window.ClayImporter.detectTailwind(raw);
+      const ed = ensureEditor(tw);
+      histSuppressed = true;
+      let result;
+      try {
+        result = window.ClayImporter.importIntoEditor(ed, raw);
+        ed.UndoManager.clear();
+      } finally {
+        histSuppressed = false;
+      }
+
+      docTailwind = result.isTailwind;
+      d.isTailwind = result.isTailwind;
+      d.scripts = result.scripts || [];
+      d.sourceHash = hashOf(raw);
+      d.styleText = result.styleText || '';
+      d.docTitle = result.docTitle || '';
+      d.headMeta = result.headMeta || [];
+      d.headLinks = result.headLinks || [];
+      d.htmlAttrs = result.htmlAttrs || {};
+      d.bodyAttrs = result.bodyAttrs || {};
+      d.viewport = result.viewport || '';
+      d.baseHref = result.baseHref || '';
+      d.headNodes = result.headNodes || [];
+      d.bodyScripts = result.bodyScripts || [];
+      d.fidelityVersion = result.fidelityVersion || 1;
+      d.baselineRules = result.baselineRules || {};
+      d.tailwindConfig = result.tailwindConfig || null;
+      d.sig = sigOf(d.docTitle, d.styleText, d.name);
+      d.data = ed.getProjectData();
+      d.dirty = false;
+      delete d.externalConflict;
+
+      setSessionMark(d.id, claySig(ed), false);
+      scheduleCanvasHeal(ed, d.id);
+      scheduleHistory();
+      ed.select(null);
+      refreshSelectionUI();
+      renderTabs();
+      setDevice(device);
+      syncThemeToPage(ed, d);
+      persist();
+      toast('检测到外部修改,已刷新 ' + d.sourcePath.split('/').pop());
+      return true;
+    } catch (err) {
+      histSuppressed = false;
+      toast('外部文件已变化,但刷新失败;Clay 已保留当前画布');
+      return false;
+    }
+  }
+
+  async function applySourceChange(change) {
+    const d = docs.find((x) => x.id === activeDocId);
+    if (!d || !d.sourcePath || !change || change.path !== d.sourcePath) return;
+
+    if (change.exists === null) {
+      toast('无法继续监听源文件;当前画布不受影响');
+      return;
+    }
+    if (change.exists === false) {
+      d.externalConflict = { missing: true };
+      renderTabs();
+      persist();
+      toast('源文件已被移动或删除;Clay 已保留当前画布');
+      return;
+    }
+
+    const raw = change.content || '';
+    const incomingHash = hashOf(raw);
+    if (incomingHash === d.sourceHash) {
+      // 外部版本又回到了 Clay 的磁盘基线(或这是 Clay 自写事件),旧冲突状态随之解除。
+      if (d.externalConflict) {
+        delete d.externalConflict;
+        renderTabs();
+        persist();
+      }
+      return;
+    }
+
+    if (!d.dirty) {
+      await reloadActiveFromSource(d, raw);
+      return;
+    }
+
+    const r = await confirmBox({
+      type: 'warning',
+      message: '源文件被其他软件修改了',
+      detail: 'Clay 里也有尚未保存的修改。载入外部版本会丢弃 Clay 中的修改;保留 Clay 版本则不会改动画布。',
+      buttons: ['保留 Clay 修改', '载入外部版本'],
+      defaultId: 0,
+      cancelId: 0,
+    });
+    // 用户考虑期间可能已经切到别的标签页;不替已经离开的页面做决定。
+    if (d.id !== activeDocId) return;
+    if (r === 1) {
+      await reloadActiveFromSource(d, raw);
+      return;
+    }
+    d.externalConflict = { missing: false, hash: incomingHash };
+    renderTabs();
+    persist();
+    toast('已保留 Clay 修改;保存到源文件前会再次确认');
+  }
+
+  async function queueSourceChange(change) {
+    pendingSourceChange = change;   // 连续保存只处理防抖后最新的一份
+    if (sourceChangeBusy) return;
+    sourceChangeBusy = true;
+    try {
+      while (pendingSourceChange) {
+        const next = pendingSourceChange;
+        pendingSourceChange = null;
+        await applySourceChange(next);
+      }
+    } finally {
+      sourceChangeBusy = false;
+    }
+  }
+
+  async function syncSourceWatch() {
+    const seq = ++sourceWatchSeq;
+    const d = docs.find((x) => x.id === activeDocId);
+    if (!d || !d.sourcePath || !(window.clay && window.clay.watchSource)) {
+      if (window.clay && window.clay.unwatchSource) await window.clay.unwatchSource();
+      return;
+    }
+    const result = await window.clay.watchSource(d.sourcePath);
+    if (seq !== sourceWatchSeq || d.id !== activeDocId) return;
+    if (!result || !result.ok) {
+      queueSourceChange({ path: d.sourcePath, exists: result && result.exists === false ? false : null, error: result && result.error });
+      return;
+    }
+    // watch 建立时顺便比一次内容,覆盖“Clay 关闭期间被外部工具修改”的场景。
+    if (d.externalConflict || !d.sourceHash || hashOf(result.content || '') !== d.sourceHash) {
+      queueSourceChange({ path: result.path || d.sourcePath, exists: true, content: result.content || '' });
+    }
   }
 
   /* 已经开着同一份来源时:内容没变就切过去;
@@ -1549,6 +2000,15 @@
       dirty: !sourcePath && !sampleKey,
       // 导出时原样还原,不被 Clay 的模板覆盖
       styleText: result.styleText || '',
+      htmlAttrs: result.htmlAttrs || {},
+      bodyAttrs: result.bodyAttrs || {},
+      viewport: result.viewport || '',
+      baseHref: result.baseHref || '',
+      headNodes: result.headNodes || [],
+      bodyScripts: result.bodyScripts || [],
+      fidelityVersion: result.fidelityVersion || 1,
+      baselineRules: result.baselineRules || {},
+      tailwindConfig: result.tailwindConfig || null,
       docTitle: result.docTitle || '',
       headMeta: result.headMeta || [],
       headLinks: result.headLinks || [],
@@ -1573,6 +2033,7 @@
     toast(bits.length ? '导入完成。' + bits.join(';') : '导入完成,点击任意元素开始编辑');
     setDevice('desktop');
     persist();
+    syncSourceWatch();
   }
 
   /* ── 保存(⌘S)────────────────────────────
@@ -1584,14 +2045,30 @@
     if (!d) return false;
     if (!d.sourcePath || !(window.clay && window.clay.writeFile)) return saveAsCopy();
 
+    if (d.externalConflict) {
+      const r = await confirmBox({
+        type: 'warning',
+        message: d.externalConflict.missing ? '源文件已经不存在' : '源文件包含其他软件的新修改',
+        detail: d.externalConflict.missing
+          ? '继续保存会在原位置重新创建文件。也可以取消后使用“另存为”,保留两个版本。'
+          : '继续保存会用 Clay 当前版本覆盖外部修改。也可以取消后使用“另存为”,保留两个版本。',
+        buttons: ['取消', d.externalConflict.missing ? '重新创建并保存' : '仍然保存并覆盖'],
+        defaultId: 0,
+        cancelId: 0,
+      });
+      if (r !== 1) return false;
+    }
+
     const result = window.ClayExporter.build(editor, d);
     const r = await window.clay.writeFile(d.sourcePath, result.code);
     if (!r || !r.ok) { toast('保存失败:' + ((r && r.error) || '未知错误')); return false; }
     d.dirty = false;
     d.sourceHash = hashOf(result.code);   // 磁盘上现在就是这份,别再误报"文件在磁盘上变了"
+    delete d.externalConflict;
     setSessionMark(d.id, claySig(editor), false);   // 保存基线:此后签名一致即干净
     renderTabs();
     persist();
+    syncSourceWatch();   // 文件若曾被删除,本次保存重建后要重新接上目录监听
     toast('已保存到 ' + d.sourcePath.split('/').pop());
     return true;
   }
@@ -1618,10 +2095,12 @@
       d.name = p.split('/').pop().replace(/\.html?$/i, '');
       d.sourceHash = hashOf(result.code);
       d.dirty = false;
+      delete d.externalConflict;
       setSessionMark(d.id, claySig(editor), false);   // 保存基线:此后签名一致即干净
       addRecent(p, d.name);   // 另存为的新文件也进"最近编辑"
       renderTabs();
       persist();
+      syncSourceWatch();
       toast('已保存为 ' + p.split('/').pop() + ',之后 ⌘S 直接存到这里');
       return true;
     }
@@ -1652,6 +2131,15 @@
     return 1440;   // 常见的桌面设计宽度,量不到画布宽度时兜底
   }
 
+  function currentExportHeight() {
+    try {
+      const fr = editor.Canvas.getFrameEl();
+      const h = fr && fr.clientHeight;
+      if (h > 0) return h;
+    } catch (e) { /* 量不到就退回默认值 */ }
+    return 900;
+  }
+
   async function exportPdf() {
     if (!editor || !activeDocId) { toast('还没有可导出的页面'); return; }
     const d = docs.find((x) => x.id === activeDocId);
@@ -1662,7 +2150,8 @@
     toast('正在生成 PDF…');
     // 相对路径图片(素材文件夹场景)要指回源目录 —— PDF 渲染用的临时文件不和原文件同目录,
     // 跟画布里那个问题是同一类,这里传源路径给主进程去插 base 修
-    const r = await window.clay.exportPdf(base + '.pdf', result.code, currentExportWidth(), d.sourcePath || '');
+    const r = await window.clay.exportPdf(base + '.pdf', result.code,
+      currentExportWidth(), currentExportHeight(), d.sourcePath || '');
     if (!r) return;                                   // 用户取消了保存框
     if (!r.ok) { toast('PDF 导出失败:' + (r.error || '未知错误')); return; }
     toast('已导出 ' + r.path.split('/').pop());
@@ -1743,17 +2232,99 @@
     clearTimeout(reconcileTimer);
     reconcileTimer = setTimeout(() => {
       scheduleHistory();
-      const d = docs.find((x) => x.id === activeDocId);
-      if (!d || !editor) return;
-      const m = sessionMark[activeDocId];
-      if (!m) return;   // 基线未建立(理论上不会:导入/切换/保存都会建),保持现状
-      const next = m.baseDirty || claySig(editor) !== m.sig;
-      if (next !== !!d.dirty) {
-        d.dirty = next;
-        renderTabs();
-        schedulePersist();
-      }
+      reconcileActiveDirtyNow();
     }, 140);
+  }
+
+  function reconcileActiveDirtyNow() {
+    const d = docs.find((x) => x.id === activeDocId);
+    if (!d || !editor) return;
+    const m = sessionMark[activeDocId];
+    if (!m) return;   // 基线未建立(理论上不会:导入/切换/保存都会建),保持现状
+    const next = m.baseDirty || claySig(editor) !== m.sig;
+    if (next !== !!d.dirty) {
+      d.dirty = next;
+      renderTabs();
+      schedulePersist();
+    }
+  }
+
+  /* 系统菜单不在画布 iframe 里,点击“退出 Clay”不会触发 GrapesJS 平时依赖的
+   * document mousedown,所以光标里的最后一段文字还只存在于 contenteditable DOM。
+   * 主动结束 RTE 会把 DOM 同步回组件模型并生成对应 Undo 动作;必须等它完成后才能
+   * 计算签名、画历史、保存工作区或询问退出,否则最后几个字会像从没输入过一样消失。 */
+  async function flushActiveTextEditing() {
+    if (!editor) return;
+    const editing = editor.getEditing && editor.getEditing();
+    if (!editing) return;
+    const view = editing.getView && editing.getView();
+    if (view && typeof view.disableEditing === 'function') {
+      await view.disableEditing();
+    } else if (editing.trigger) {
+      editing.trigger('sync:content', { force: true });
+    }
+    // disableEditing 内部含异步 RTE 读取;回到这里时撤销栈已同步,立即重画即可。
+    clearTimeout(histTimer);
+    renderHistory();
+  }
+
+  async function handleCloseRequest() {
+    if (closePromptBusy || !(window.clay && window.clay.respondToClose)) return;
+    closePromptBusy = true;
+    try {
+      // 用户可能刚输入完就点系统菜单;先把仍在光标里的文字提交到模型和历史。
+      await flushActiveTextEditing();
+      // 140ms 的防抖也可能还没来得及标脏;退出前必须同步算一次。
+      clearTimeout(reconcileTimer);
+      reconcileActiveDirtyNow();
+      snapshotActive();
+      const dirtyIds = docs.filter((d) => d.dirty).map((d) => d.id);
+      if (!dirtyIds.length) {
+        window.clay.respondToClose(commitClosedWorkspace());
+        return;
+      }
+
+      const names = dirtyIds.map((id) => {
+        const d = docs.find((x) => x.id === id);
+        return d ? `「${d.name}」` : '';
+      }).filter(Boolean);
+      const shown = names.slice(0, 3).join('、') + (names.length > 3 ? ` 等 ${names.length} 个页面` : '');
+      const response = await confirmBox({
+        type: 'question',
+        message: dirtyIds.length === 1 ? `${shown}有未保存的修改` : `有 ${dirtyIds.length} 个页面尚未保存`,
+        detail: '“保存并退出”会逐一写回 HTML；“直接退出”会丢弃未保存修改，不写回源文件。',
+        buttons: ['保存并退出', '直接退出', '取消'],
+        defaultId: 0,
+        cancelId: 2,
+      });
+
+      if (response === 2) {
+        window.clay.respondToClose(false);
+        return;
+      }
+      if (response === 1) {
+        window.clay.respondToClose(commitClosedWorkspace());
+        return;
+      }
+
+      for (const id of dirtyIds) {
+        const d = docs.find((x) => x.id === id);
+        if (!d || !d.dirty) continue;
+        if (id !== activeDocId) activateDoc(id);
+        const saved = await (d.sourcePath ? saveToSource() : saveAsCopy());
+        if (!saved) {
+          window.clay.respondToClose(false);
+          return;
+        }
+      }
+      snapshotActive();
+      window.clay.respondToClose(commitClosedWorkspace());
+    } catch (err) {
+      toast('退出前保存失败,已留在 Clay');
+      window.clay.respondToClose(false);
+    } finally {
+      closePromptBusy = false;
+    }
   }
 
   /* ── 历史记录(Photoshop 式)────────────────
@@ -1986,7 +2557,7 @@
     $$('[data-sample]').forEach((b) => {
       b.onclick = () => {
         const key = b.dataset.sample;
-        const name = key === 'tailwind' ? 'v0 风格落地页' : 'Bolt 风格官网';
+        const name = key === 'tailwind' ? '深色落地页' : '品牌官网';
         runImport(window.CLAY_SAMPLES[key], name, '', key);
       };
     });
@@ -2073,9 +2644,11 @@
   }
 
   // 调试句柄(自动化验证用,和 __clayEditor 一个性质):不参与任何用户路径
-  window.__clay = { runImport, getDocs: () => docs, getRecents: () => recents, saveToSource, saveAsCopy, exportPdf, copyCode, closeDoc, jumpHistory, renderHistory, renderHome, openRecent };
+  window.__clay = { runImport, getDocs: () => docs, getRecents: () => recents, getActiveDocId: () => activeDocId, saveToSource, saveAsCopy, exportPdf, copyCode, closeDoc, jumpHistory, renderHistory, renderHome, openRecent };
 
   wireUI();
+  if (window.clay && window.clay.onSourceChanged) window.clay.onSourceChanged(queueSourceChange);
+  if (window.clay && window.clay.onRequestClose) window.clay.onRequestClose(handleCloseRequest);
   enableFileDrop();
   enableLiveStyleInput();
   enableToolbarTips();
@@ -2087,9 +2660,10 @@
   // 关窗时 async IPC 来不及往返,这里同步落一份(桌面端由主进程 sendSync 兜底)
   window.addEventListener('beforeunload', () => {
     if (!restored) return;   // 还没读完磁盘就关窗 → 什么都别写,否则会用空数据覆盖存档
+    if (cleanExitCommitted) return;   // 正常退出的空会话已同步写好,绝不能再拿旧 docs 覆盖回来
     clearTimeout(persistTimer);
     snapshotActive();
-    const json = JSON.stringify({ docs, activeDocId, docSeq, recents });
+    const json = workspaceJson();
     if (window.clay && window.clay.saveWorkspaceSync) window.clay.saveWorkspaceSync(json);
     else { try { localStorage.setItem(STORE_KEY, json); } catch (e) { /* 超限则依赖上一次自动保存 */ } }
   });

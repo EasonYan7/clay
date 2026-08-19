@@ -6,6 +6,8 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
+    "test:fidelity": "electron tests/fidelity.e2e.js",
+    "test:editor": "node tests/run-editor-behavior.js",
     "dist": "electron-builder --mac"
   },
   "devDependencies": {
