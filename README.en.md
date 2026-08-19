@@ -15,6 +15,7 @@
   <img alt="Electron 33" src="https://img.shields.io/badge/Electron-33-47848F?style=flat-square&amp;logo=electron&amp;logoColor=white" />
   <img alt="Local first" src="https://img.shields.io/badge/Local--first-No_account-6D4AFF?style=flat-square" />
   <img alt="Languages" src="https://img.shields.io/badge/UI-中文%20%7C%20English-2EA44F?style=flat-square" />
+  <a href="./LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/License-MIT-F4B942?style=flat-square" /></a>
 </p>
 
 <p align="center">
@@ -203,9 +204,9 @@ When reporting a problem, include your macOS version, steps to reproduce, expect
 - Windows and Linux support
 - A more complete contribution guide and open-source release process
 
-## Open-source status
+## License
 
-This repository is publicly visible but does not yet include an open-source license. Until a license is selected, all rights are reserved by default. A license and contribution terms are planned before the first formal release.
+Clay is open source under the [MIT License](./LICENSE). You may use, copy, modify, merge, publish, and distribute the project as long as the original copyright and license notice are retained.
 
 ---
 

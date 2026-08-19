@@ -15,6 +15,7 @@
   <img alt="Electron 33" src="https://img.shields.io/badge/Electron-33-47848F?style=flat-square&amp;logo=electron&amp;logoColor=white" />
   <img alt="Local first" src="https://img.shields.io/badge/Local--first-无需账号-6D4AFF?style=flat-square" />
   <img alt="Languages" src="https://img.shields.io/badge/UI-中文%20%7C%20English-2EA44F?style=flat-square" />
+  <a href="./LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/License-MIT-F4B942?style=flat-square" /></a>
 </p>
 
 <p align="center">
@@ -203,9 +204,9 @@ Clay 仍在早期阶段，真实页面和明确的复现步骤尤其有价值。
 - 完善 Windows / Linux 支持
 - 建立更完整的贡献指南与开源发布流程
 
-## 开源状态
+## 许可证
 
-仓库目前公开可见，但尚未添加正式开源许可证。在许可证确定前，代码默认保留全部权利。计划在正式发布前补充许可证与贡献约定。
+Clay 使用 [MIT License](./LICENSE) 开源。你可以使用、复制、修改、合并、发布和分发本项目，但需要保留原始版权与许可证声明。
 
 ---
 
