@@ -5,79 +5,151 @@
   <a href="./README.en.md"><img src="https://img.shields.io/badge/English-Read_in_English-EDEDF0?style=for-the-badge&amp;labelColor=26262B" alt="English" /></a>
 </p>
 
-<p align="center"><strong>把 AI 生成的 HTML 变成人人可编辑的画布。</strong><br />一款面向非技术用户的 macOS 桌面应用。</p>
-
 <p align="center">
-  <img src="docs/screenshots/editor.png" width="800" alt="Clay 编辑器界面" />
+  <strong>把 AI 生成的 HTML，变成人人可编辑的画布。</strong><br />
+  打开页面、直接调整、干净导出——不需要先学会写代码。
 </p>
 
-## 这是什么
+<p align="center">
+  <img alt="macOS" src="https://img.shields.io/badge/macOS-当前支持-111111?style=flat-square&amp;logo=apple" />
+  <img alt="Electron 33" src="https://img.shields.io/badge/Electron-33-47848F?style=flat-square&amp;logo=electron&amp;logoColor=white" />
+  <img alt="Local first" src="https://img.shields.io/badge/Local--first-无需账号-6D4AFF?style=flat-square" />
+  <img alt="Languages" src="https://img.shields.io/badge/UI-中文%20%7C%20English-2EA44F?style=flat-square" />
+</p>
 
-AI 生成的 HTML/CSS 页面，对不写代码的人（产品经理、运营、市场）来说常常是个黑盒——想改一个字号、挪一下按钮，只能回去重新 prompt AI，越改越乱；而传统可视化工具通常又无法直接接手这些任意 HTML。
+<p align="center">
+  <img src="docs/screenshots/editor.png" width="880" alt="Clay 可视化 HTML 编辑器" />
+</p>
 
-Clay 就是补这段：把任意来源的 HTML 粘贴或打开进来，拆解成一棵可点选的组件树，在可视化画布里拖拽、改样式、改文字，再导出一份干净的、原始代码几乎零改动的 HTML（或者直接出一张 PDF）。
+> [!NOTE]
+> Clay 目前处于早期预览阶段，仅支持 macOS，尚未提供签名安装包。你可以按照下方步骤从源码运行。
 
-## 核心功能
+## 为什么需要 Clay？
 
-- **智能拆解**：粘贴或打开 HTML，自动解析出语义化图层树（页头、导航、卡片 1/2/3……），不是一坨匿名 `div`
-- **所见即所得编辑**：点选任意元素调整字号、颜色、圆角、阴影和间距，改动实时生效，并回显当前真实值
-- **中英文界面**：首次启动跟随系统语言，顶部可随时切换中文 / English；主页、编辑器、图层、历史、弹窗与系统菜单保持同一语言
-- **拖拽与结构**：按住元素直接拖动换位（自动吸附，不产生绝对定位）；选中元素可以“同级复制”或“下方加空白同类”
-- **双击编辑**：双击文字直接修改内容，双击图片即可替换
-- **设备预览**：电脑、平板、手机三种视图一键切换
-- **历史记录**：时间线式记录每一步修改，用当前界面语言给出人话描述，点哪条就跳回哪条
-- **深浅色自动匹配**：根据页面本身的配色自动切换编辑器皮肤
-- **直观保存**：⌘S 直接存回源文件，⇧⌘S 另存为且不改动原稿
-- **外部文件同步**：源文件被其他软件修改后自动刷新；双方都有修改时先询问，不静默覆盖
-- **干净导出**：原始 CSS 逐字保留，Clay 的改动单独成段；Tailwind 页面可提取为静态 CSS，交互脚本在导出时还原
-- **PDF 导出**：按当前电脑、平板或手机视图生成连续单页 PDF
-- **最近编辑**：主页展示最近打开过的文件，正常退出后下次仍从主页开始
+AI 很擅长生成页面，但一次生成通常不是终点。改一句文案、移动一张卡片、调整手机布局，都可能需要再次描述需求、等待生成，并承担其他部分被意外改写的风险。
 
-## 界面一览
+Clay 让这一步更直接：把已有 HTML 当作设计稿打开，在画布中点选、拖动和修改，确认效果后保存回原文件，或者导出一份可继续交给开发的 HTML。
+
+### Clay 适合你，如果你想要
+
+- 修改 AI 生成页面中的文案、图片、颜色、字号和间距
+- 不写 CSS，也能调整卡片顺序和页面结构
+- 在电脑、平板和手机尺寸下检查响应式效果
+- 保留现有 HTML/CSS，而不是每次重新生成整个页面
+- 在设计、产品、运营与开发之间传递一份可继续编辑的文件
+
+## 三步完成一次修改
+
+1. **打开**：选择本地 HTML 文件，或直接粘贴 HTML 代码。
+2. **编辑**：在画布中点选元素，修改内容与样式，拖动调整顺序。
+3. **交付**：保存回原文件、另存为新的 HTML，或导出 PDF。
 
 <table>
 <tr>
 <td width="50%">
-<img src="docs/screenshots/home.png" alt="主页" />
-<p align="center"><sub>首次使用：手绘引导页，箭头直接指向工具栏对应功能</sub></p>
+<img src="docs/screenshots/home.png" alt="Clay 主页" />
+<p align="center"><sub>打开文件或粘贴代码，最近项目随时可再次进入</sub></p>
 </td>
 <td width="50%">
-<img src="docs/screenshots/history.png" alt="历史记录面板" />
-<p align="center"><sub>历史记录：每一步修改都是人话描述，可以跳回任意时刻</sub></p>
+<img src="docs/screenshots/history.png" alt="Clay 历史记录" />
+<p align="center"><sub>每次修改都有可读记录，并能回到之前的状态</sub></p>
 </td>
 </tr>
 </table>
 
 <p align="center">
-  <img src="docs/screenshots/mobile.png" width="360" alt="手机设备预览" />
-  <br/><sub>设备预览：一键切到手机视图，响应式样式实时生效</sub>
+  <img src="docs/screenshots/mobile.png" width="420" alt="Clay 手机预览" />
+  <br /><sub>在手机视图中检查响应式布局</sub>
 </p>
 
-## 技术栈
+## 你可以做什么
 
-- **Electron 33** + **electron-builder**：桌面运行与 macOS 打包
-- **GrapesJS**：本地内置编辑器底座，不依赖在线加载；在其上实现导入、导出、拖拽、历史和未保存状态
-- 纯原生 JavaScript 渲染层，无前端构建步骤和框架依赖
-- Tailwind Play CDN 仅用于画布内实时预览，导出时尽量静态提取替换
+| 能力 | 用户体验 |
+| --- | --- |
+| 打开任意 HTML | 使用本地文件或粘贴代码，不绑定特定生成工具 |
+| 语义化图层 | 自动识别页头、导航、卡片等结构，减少匿名 `div` 带来的理解成本 |
+| 可视化样式 | 调整字体、颜色、边框、圆角、阴影、间距与布局 |
+| 直接编辑 | 双击文字修改内容，双击图片完成替换 |
+| 结构拖拽 | 在页面中移动元素，并保持正常文档布局 |
+| 多设备预览 | 在电脑、平板与手机视图之间切换 |
+| 修改历史 | 用人话记录操作，并跳回任意历史状态 |
+| 外部文件同步 | 其他软件改动源文件后自动刷新；发生冲突时先询问 |
+| 保真导出 | 尽量保留原始 CSS、页面结构与脚本，并把 Clay 改动独立输出 |
+| 双语界面 | 中文与 English 覆盖主页、编辑器、弹窗和 macOS 菜单 |
 
-## 本地运行
+## 本地优先
+
+Clay 不要求登录账号，也不会把你打开的 HTML 主动上传到服务器。文件读取、编辑历史和保存都在本机完成。
+
+如果原页面引用了在线字体、图片、样式或脚本，预览这些资源时仍可能访问其原始网络地址。Tailwind Play CDN 页面也可能在预览阶段使用网络。
+
+## 快速开始
+
+### 环境要求
+
+- macOS
+- Node.js 与 npm
+- Git（用于克隆仓库）
+
+### 从源码运行
 
 ```bash
-cd app
+git clone https://github.com/EasonYan7/clay.git
+cd clay/app
 npm install
 npm start
 ```
 
-## 打包
+启动后可点击“打开 HTML 文件”，也可以直接将 `.html` 文件拖入窗口。
+
+### 打包 macOS 应用
 
 ```bash
 cd app
 npm run dist
 ```
 
-产物在 `app/dist/`。默认生成当前 Mac 架构对应的应用；当前未做代码签名与公证，分发给他人需自行签名，或由对方手动允许运行。
+构建产物位于 `app/dist/`。当前产物未做代码签名与公证，macOS 可能阻止直接打开。
 
-## 测试
+## 当前支持范围
+
+| 项目 | 状态 |
+| --- | --- |
+| macOS | ✅ 当前支持 |
+| Windows / Linux | ⏳ 尚未适配与验证 |
+| 本地 HTML 文件 | ✅ 支持 |
+| 粘贴 HTML 代码 | ✅ 支持 |
+| 通过 URL 导入网页 | ⏳ 暂不支持 |
+| 导出 HTML / PDF | ✅ 支持 |
+| 已签名安装包 | ⏳ 暂未提供 |
+
+## 常见问题
+
+<details>
+<summary><strong>Clay 会重写我的全部代码吗？</strong></summary>
+<br />
+Clay 会尽量保留原始 HTML、CSS 与脚本，只把画布中的修改单独写入导出结果。复杂页面仍建议先保留源文件副本，并在导出后进行浏览器验收。
+</details>
+
+<details>
+<summary><strong>可以编辑 Tailwind 页面吗？</strong></summary>
+<br />
+可以。Clay 会识别常见 Tailwind 页面并尽量生成可离线使用的样式。包含函数、插件或运行时逻辑的复杂配置可能无法完整静态化。
+</details>
+
+<details>
+<summary><strong>为什么部分动态内容看不到？</strong></summary>
+<br />
+为了安全和可预测性，画布不会执行任意业务脚本。依赖 JavaScript 在运行时生成的内容，可能需要先转换为静态 HTML 再编辑。
+</details>
+
+<details>
+<summary><strong>可以在 Windows 上运行吗？</strong></summary>
+<br />
+当前版本只在 macOS 上开发和验证。底层技术支持跨平台，但 Windows 与 Linux 仍需要适配、打包和回归测试。
+</details>
+
+## 开发与测试
 
 ```bash
 cd app
@@ -86,32 +158,55 @@ npm run test:fidelity
 npm run test:i18n
 ```
 
-三组回归分别覆盖编辑与退出行为、导入/画布/导出保真，以及中文与英文界面切换。
+- `test:editor`：编辑、历史、拖拽、保存与退出行为
+- `test:fidelity`：导入、画布渲染和导出结果保真
+- `test:i18n`：中文与英文界面、动态文案和弹窗
 
-## 项目结构
+<details>
+<summary><strong>查看项目结构</strong></summary>
 
-```
+```text
 app/
-  main.js              # Electron 主进程：文件读写、原生对话框、PDF 渲染
-  preload.js           # 主进程 ↔ 渲染进程的受控桥接
+  main.js              # Electron 主进程、文件、菜单、对话框与 PDF
+  preload.js           # 主进程与渲染进程之间的受控桥接
   renderer/
-    app.js             # 应用装配层（状态管理、UI 接线、历史/未保存状态）
-    i18n.js            # 中英文词典、语言状态与静态文案绑定
-    importer.js        # HTML 解析 → 组件树，含 Tailwind 检测、语义化命名
-    exporter.js        # 导出：原始 CSS 保留 + Clay 改动单独成段
-    styles.css         # 设计系统，含手绘风格主页与最近编辑卡片
+    app.js             # 应用状态、编辑器接线、历史与保存状态
+    i18n.js            # 中英文词典和语言状态
+    importer.js        # HTML 解析、Tailwind 检测与语义化命名
+    exporter.js        # 面向保真的 HTML 导出
+    styles.css         # Clay 界面设计系统
     vendor/            # 本地内置的 GrapesJS
-  tests/               # 编辑行为、保真与多语言回归
+  tests/               # 编辑、保真与多语言回归
 docs/
-  grapesjs-findings.md # 选型阶段对 GrapesJS 原生能力的实测记录
+  screenshots/         # README 界面截图
+  grapesjs-findings.md # 编辑器选型阶段的实测记录
 ```
 
-## 添加新语言
+</details>
 
-界面文案集中在 `app/renderer/i18n.js`。新增语言时扩展 `MESSAGES`，再在顶部语言切换器加入对应入口；动态文案使用 `t(key, vars)`，静态 HTML 使用 `data-i18n` 系列属性。提交前运行 `npm run test:i18n`，验证主页、编辑器内部文案和退出弹窗。
+## 参与项目
 
-## 已知限制
+Clay 仍在早期阶段，真实页面和明确的复现步骤尤其有价值。欢迎通过 [Issues](https://github.com/EasonYan7/clay/issues) 提交：
 
-- 未做代码签名/公证
-- 页面若自带 `prefers-color-scheme: dark` 的深色模式变体，Clay 的样式改动目前会覆盖它
-- URL 导入（粘贴链接直接拉取远程页面）尚未支持，目前仅支持本地文件或粘贴代码
+- 无法正确打开或导出的 HTML 示例
+- 画布与浏览器显示不一致的情况
+- 拖拽、历史、保存和文件同步问题
+- Windows / Linux 适配建议
+- 新语言翻译与文案改进
+
+提交问题时，请尽量附上 macOS 版本、操作步骤、预期结果和实际结果。涉及内部页面时，请先删除敏感信息。
+
+## 路线图
+
+- 提供签名、公证的 macOS 安装包与 GitHub Releases
+- 扩大复杂 CSS、Tailwind 配置和动态页面的保真覆盖
+- 完善 Windows / Linux 支持
+- 建立更完整的贡献指南与开源发布流程
+
+## 开源状态
+
+仓库目前公开可见，但尚未添加正式开源许可证。在许可证确定前，代码默认保留全部权利。计划在正式发布前补充许可证与贡献约定。
+
+---
+
+如果 Clay 对你有帮助，欢迎点一个 ⭐，也欢迎带着真实页面来提出问题。
