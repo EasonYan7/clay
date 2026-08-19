@@ -2,12 +2,13 @@
   "name": "clay",
   "productName": "Clay",
   "version": "0.1.0",
-  "description": "把 AI 生成的 HTML 变成人人可编辑的画布",
+  "description": "Turn AI-generated HTML into an editable visual canvas",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
     "test:fidelity": "electron tests/fidelity.e2e.js",
     "test:editor": "node tests/run-editor-behavior.js",
+    "test:i18n": "electron tests/i18n.e2e.js",
     "dist": "electron-builder --mac"
   },
   "devDependencies": {

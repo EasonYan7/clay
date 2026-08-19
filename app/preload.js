@@ -24,6 +24,8 @@ contextBridge.exposeInMainWorld('clay', {
   // 关窗瞬间用同步通道,否则异步 IPC 还没往返完窗口就没了
   saveWorkspaceSync: (json) => ipcRenderer.sendSync('clay:save-workspace-sync', json),
   loadWorkspace: () => ipcRenderer.invoke('clay:load-workspace'),
+  setLocale: (locale) => ipcRenderer.send('clay:set-locale', locale),
+  reloadForLocale: (locale) => ipcRenderer.send('clay:reload-for-locale', locale),
   onMenu: (cb) => ipcRenderer.on('clay-menu', (_e, action) => cb(action)),
   onRequestClose: (cb) => {
     const handler = () => cb();

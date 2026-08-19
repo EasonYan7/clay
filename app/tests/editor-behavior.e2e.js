@@ -23,7 +23,8 @@ const savedWorkspace = {
 const preloadPath = path.join(testDir, 'seed-workspace.js');
 fs.writeFileSync(
   preloadPath,
-  `if (!localStorage.getItem('clay-workspace-v1')) localStorage.setItem('clay-workspace-v1', ${JSON.stringify(JSON.stringify(savedWorkspace))});
+  `localStorage.setItem('clay-locale', 'zh-CN');
+   if (!localStorage.getItem('clay-workspace-v1')) localStorage.setItem('clay-workspace-v1', ${JSON.stringify(JSON.stringify(savedWorkspace))});
    window.__closeResponse = 2;
    window.__closeDecision = null;
    window.__confirmCalls = 0;
