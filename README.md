@@ -1,98 +1,98 @@
 # Clay
 
 <p align="center">
-  <a href="./README.md"><img src="https://img.shields.io/badge/简体中文-当前语言-6D4AFF?style=for-the-badge" alt="简体中文" /></a>
-  <a href="./README.en.md"><img src="https://img.shields.io/badge/English-Read_in_English-EDEDF0?style=for-the-badge&amp;labelColor=26262B" alt="English" /></a>
+  <a href="./README.zh-CN.md"><img src="https://img.shields.io/badge/简体中文-阅读中文版-EDEDF0?style=for-the-badge&amp;labelColor=26262B" alt="简体中文" /></a>
+  <a href="./README.md"><img src="https://img.shields.io/badge/English-Current_language-6D4AFF?style=for-the-badge" alt="English" /></a>
 </p>
 
 <p align="center">
-  <strong>把 AI 生成的 HTML，变成人人可编辑的画布。</strong><br />
-  打开页面、直接调整、干净导出——不需要先学会写代码。
+  <strong>Turn AI-generated HTML into an editable visual canvas.</strong><br />
+  Open a page, adjust it directly, and export clean code—without learning CSS first.
 </p>
 
 <p align="center">
-  <img alt="macOS" src="https://img.shields.io/badge/macOS-当前支持-111111?style=flat-square&amp;logo=apple" />
+  <img alt="macOS" src="https://img.shields.io/badge/macOS-Supported-111111?style=flat-square&amp;logo=apple" />
   <img alt="Electron 33" src="https://img.shields.io/badge/Electron-33-47848F?style=flat-square&amp;logo=electron&amp;logoColor=white" />
-  <img alt="Local first" src="https://img.shields.io/badge/Local--first-无需账号-6D4AFF?style=flat-square" />
+  <img alt="Local first" src="https://img.shields.io/badge/Local--first-No_account-6D4AFF?style=flat-square" />
   <img alt="Languages" src="https://img.shields.io/badge/UI-中文%20%7C%20English-2EA44F?style=flat-square" />
   <a href="./LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/License-MIT-F4B942?style=flat-square" /></a>
 </p>
 
 <p align="center">
-  <img src="docs/screenshots/editor.png" width="880" alt="Clay 可视化 HTML 编辑器" />
+  <img src="docs/screenshots/editor.png" width="880" alt="Clay visual HTML editor" />
 </p>
 
 > [!NOTE]
-> Clay 目前处于早期预览阶段，仅支持 macOS，尚未提供签名安装包。你可以按照下方步骤从源码运行。
+> Clay is currently an early preview for macOS. Signed installers are not available yet, but you can run it from source using the steps below.
 
-## 为什么需要 Clay？
+## Why Clay?
 
-AI 很擅长生成页面，但一次生成通常不是终点。改一句文案、移动一张卡片、调整手机布局，都可能需要再次描述需求、等待生成，并承担其他部分被意外改写的风险。
+AI can generate a page in seconds, but the first output is rarely the last. Changing one sentence, moving a card, or fixing a mobile layout often means prompting again and risking unexpected changes elsewhere.
 
-Clay 让这一步更直接：把已有 HTML 当作设计稿打开，在画布中点选、拖动和修改，确认效果后保存回原文件，或者导出一份可继续交给开发的 HTML。
+Clay makes that iteration direct. Open an existing HTML file as a visual canvas, select and move elements, preview the result, then save it back or export HTML that a developer can continue working with.
 
-### Clay 适合你，如果你想要
+### Clay is for you if you want to
 
-- 修改 AI 生成页面中的文案、图片、颜色、字号和间距
-- 不写 CSS，也能调整卡片顺序和页面结构
-- 在电脑、平板和手机尺寸下检查响应式效果
-- 保留现有 HTML/CSS，而不是每次重新生成整个页面
-- 在设计、产品、运营与开发之间传递一份可继续编辑的文件
+- Change copy, images, colors, type, and spacing in an AI-generated page
+- Rearrange cards and sections without writing CSS
+- Check responsive layouts at desktop, tablet, and mobile sizes
+- Preserve the existing HTML and CSS instead of regenerating the whole page
+- Hand off one editable file across design, product, marketing, and engineering
 
-## 三步完成一次修改
+## One edit in three steps
 
-1. **打开**：选择本地 HTML 文件，或直接粘贴 HTML 代码。
-2. **编辑**：在画布中点选元素，修改内容与样式，拖动调整顺序。
-3. **交付**：保存回原文件、另存为新的 HTML，或导出 PDF。
+1. **Open** a local HTML file or paste HTML source.
+2. **Edit** content and styles on the canvas, then drag elements into place.
+3. **Deliver** by saving the source, creating a copy, or exporting a PDF.
 
 <table>
 <tr>
 <td width="50%">
-<img src="docs/screenshots/home.png" alt="Clay 主页" />
-<p align="center"><sub>打开文件或粘贴代码，最近项目随时可再次进入</sub></p>
+<img src="docs/screenshots/home.png" alt="Clay home screen" />
+<p align="center"><sub>Open a file or paste code, with recent projects ready to revisit</sub></p>
 </td>
 <td width="50%">
-<img src="docs/screenshots/history.png" alt="Clay 历史记录" />
-<p align="center"><sub>每次修改都有可读记录，并能回到之前的状态</sub></p>
+<img src="docs/screenshots/history.png" alt="Clay edit history" />
+<p align="center"><sub>Readable edit history with jump-to-state navigation</sub></p>
 </td>
 </tr>
 </table>
 
 <p align="center">
-  <img src="docs/screenshots/mobile.png" width="420" alt="Clay 手机预览" />
-  <br /><sub>在手机视图中检查响应式布局</sub>
+  <img src="docs/screenshots/mobile.png" width="420" alt="Clay mobile preview" />
+  <br /><sub>Inspect responsive behavior in the mobile preview</sub>
 </p>
 
-## 你可以做什么
+## What you can do
 
-| 能力 | 用户体验 |
+| Capability | What it means for you |
 | --- | --- |
-| 打开任意 HTML | 使用本地文件或粘贴代码，不绑定特定生成工具 |
-| 语义化图层 | 自动识别页头、导航、卡片等结构，减少匿名 `div` 带来的理解成本 |
-| 可视化样式 | 调整字体、颜色、边框、圆角、阴影、间距与布局 |
-| 直接编辑 | 双击文字修改内容，双击图片完成替换 |
-| 结构拖拽 | 在页面中移动元素，并保持正常文档布局 |
-| 多设备预览 | 在电脑、平板与手机视图之间切换 |
-| 修改历史 | 用人话记录操作，并跳回任意历史状态 |
-| 外部文件同步 | 其他软件改动源文件后自动刷新；发生冲突时先询问 |
-| 保真导出 | 尽量保留原始 CSS、页面结构与脚本，并把 Clay 改动独立输出 |
-| 双语界面 | 中文与 English 覆盖主页、编辑器、弹窗和 macOS 菜单 |
+| Open existing HTML | Use a local file or pasted source—Clay is not tied to a particular generator |
+| Semantic layers | Work with recognizable headers, navigation, and cards instead of anonymous `div` nodes |
+| Visual styling | Adjust typography, color, borders, radius, shadows, spacing, and layout |
+| Direct editing | Double-click text to edit it and double-click an image to replace it |
+| Structural drag and drop | Move elements while preserving normal document flow |
+| Responsive previews | Switch between desktop, tablet, and mobile views |
+| Edit history | Read each change in plain language and return to an earlier state |
+| External file sync | Refresh when another app changes the source, with conflict protection |
+| Fidelity-focused export | Preserve original CSS, structure, and scripts while keeping Clay changes separate |
+| Bilingual interface | Use Simplified Chinese or English across the app and macOS menus |
 
-## 本地优先
+## Local-first by design
 
-Clay 不要求登录账号，也不会把你打开的 HTML 主动上传到服务器。文件读取、编辑历史和保存都在本机完成。
+Clay does not require an account and does not intentionally upload the HTML you open. File access, edit history, and saving happen on your Mac.
 
-如果原页面引用了在线字体、图片、样式或脚本，预览这些资源时仍可能访问其原始网络地址。Tailwind Play CDN 页面也可能在预览阶段使用网络。
+If the original page references remote fonts, images, styles, or scripts, previewing those resources may still contact their original hosts. Tailwind Play CDN pages may also need network access while being previewed.
 
-## 快速开始
+## Quick start
 
-### 环境要求
+### Requirements
 
 - macOS
-- Node.js 与 npm
-- Git（用于克隆仓库）
+- Node.js and npm
+- Git for cloning the repository
 
-### 从源码运行
+### Run from source
 
 ```bash
 git clone https://github.com/EasonYan7/clay.git
@@ -101,56 +101,56 @@ npm install
 npm start
 ```
 
-启动后可点击“打开 HTML 文件”，也可以直接将 `.html` 文件拖入窗口。
+Once Clay opens, choose “Open HTML File” or drag a `.html` file into the window.
 
-### 打包 macOS 应用
+### Build the macOS app
 
 ```bash
 cd app
 npm run dist
 ```
 
-构建产物位于 `app/dist/`。当前产物未做代码签名与公证，macOS 可能阻止直接打开。
+Build artifacts are written to `app/dist/`. They are not currently code-signed or notarized, so macOS may block them from opening normally.
 
-## 当前支持范围
+## Current support
 
-| 项目 | 状态 |
+| Area | Status |
 | --- | --- |
-| macOS | ✅ 当前支持 |
-| Windows / Linux | ⏳ 尚未适配与验证 |
-| 本地 HTML 文件 | ✅ 支持 |
-| 粘贴 HTML 代码 | ✅ 支持 |
-| 通过 URL 导入网页 | ⏳ 暂不支持 |
-| 导出 HTML / PDF | ✅ 支持 |
-| 已签名安装包 | ⏳ 暂未提供 |
+| macOS | ✅ Supported |
+| Windows / Linux | ⏳ Not adapted or verified yet |
+| Local HTML files | ✅ Supported |
+| Pasted HTML source | ✅ Supported |
+| Import from a URL | ⏳ Not supported yet |
+| HTML / PDF export | ✅ Supported |
+| Signed installer | ⏳ Not available yet |
 
-## 常见问题
+## FAQ
 
 <details>
-<summary><strong>Clay 会重写我的全部代码吗？</strong></summary>
+<summary><strong>Will Clay rewrite all of my code?</strong></summary>
 <br />
-Clay 会尽量保留原始 HTML、CSS 与脚本，只把画布中的修改单独写入导出结果。复杂页面仍建议先保留源文件副本，并在导出后进行浏览器验收。
+Clay tries to preserve the original HTML, CSS, and scripts, and writes canvas changes separately in the exported result. For complex pages, keep a copy of the source and verify the export in a browser.
 </details>
 
 <details>
-<summary><strong>可以编辑 Tailwind 页面吗？</strong></summary>
+<summary><strong>Can Clay edit Tailwind pages?</strong></summary>
 <br />
-可以。Clay 会识别常见 Tailwind 页面并尽量生成可离线使用的样式。包含函数、插件或运行时逻辑的复杂配置可能无法完整静态化。
+Yes. Clay recognizes common Tailwind pages and tries to produce static styles that work offline. Complex configurations containing functions, plugins, or runtime logic may not be fully converted.
 </details>
 
 <details>
-<summary><strong>为什么部分动态内容看不到？</strong></summary>
+<summary><strong>Why is some dynamic content missing?</strong></summary>
 <br />
-为了安全和可预测性，画布不会执行任意业务脚本。依赖 JavaScript 在运行时生成的内容，可能需要先转换为静态 HTML 再编辑。
+For safety and predictability, the canvas does not execute arbitrary application scripts. Content generated by JavaScript at runtime may need to be converted to static HTML before editing.
 </details>
 
 <details>
-<summary><strong>可以在 Windows 上运行吗？</strong></summary>
+<summary><strong>Can I use Clay on Windows?</strong></summary>
 <br />
-当前版本只在 macOS 上开发和验证。底层技术支持跨平台，但 Windows 与 Linux 仍需要适配、打包和回归测试。
+Clay is currently developed and tested only on macOS. Its foundation is cross-platform, but Windows and Linux still need packaging, adaptation, and regression testing.
 </details>
 
-## 开发与测试
+## Development and tests
 
 ```bash
 cd app
@@ -159,55 +159,55 @@ npm run test:fidelity
 npm run test:i18n
 ```
 
-- `test:editor`：编辑、历史、拖拽、保存与退出行为
-- `test:fidelity`：导入、画布渲染和导出结果保真
-- `test:i18n`：中文与英文界面、动态文案和弹窗
+- `test:editor` covers editing, history, drag and drop, saving, and quitting
+- `test:fidelity` covers import, canvas rendering, and exported output
+- `test:i18n` covers Chinese and English UI, dynamic copy, and dialogs
 
 <details>
-<summary><strong>查看项目结构</strong></summary>
+<summary><strong>View the project structure</strong></summary>
 
 ```text
 app/
-  main.js              # Electron 主进程、文件、菜单、对话框与 PDF
-  preload.js           # 主进程与渲染进程之间的受控桥接
+  main.js              # Electron main process, files, menus, dialogs, and PDF
+  preload.js           # Controlled bridge between main and renderer processes
   renderer/
-    app.js             # 应用状态、编辑器接线、历史与保存状态
-    i18n.js            # 中英文词典和语言状态
-    importer.js        # HTML 解析、Tailwind 检测与语义化命名
-    exporter.js        # 面向保真的 HTML 导出
-    styles.css         # Clay 界面设计系统
-    vendor/            # 本地内置的 GrapesJS
-  tests/               # 编辑、保真与多语言回归
+    app.js             # Application state, editor wiring, history, and save state
+    i18n.js            # Chinese and English dictionaries and locale state
+    importer.js        # HTML parsing, Tailwind detection, and semantic naming
+    exporter.js        # Fidelity-oriented HTML export
+    styles.css         # Clay interface design system
+    vendor/            # Bundled GrapesJS runtime
+  tests/               # Editor, fidelity, and localization regressions
 docs/
-  screenshots/         # README 界面截图
-  grapesjs-findings.md # 编辑器选型阶段的实测记录
+  screenshots/         # README interface screenshots
+  grapesjs-findings.md # Findings from the editor evaluation phase
 ```
 
 </details>
 
-## 参与项目
+## Contributing
 
-Clay 仍在早期阶段，真实页面和明确的复现步骤尤其有价值。欢迎通过 [Issues](https://github.com/EasonYan7/clay/issues) 提交：
+Clay is still early, which makes real pages and clear reproduction steps especially useful. Open an [Issue](https://github.com/EasonYan7/clay/issues) for:
 
-- 无法正确打开或导出的 HTML 示例
-- 画布与浏览器显示不一致的情况
-- 拖拽、历史、保存和文件同步问题
-- Windows / Linux 适配建议
-- 新语言翻译与文案改进
+- HTML that does not import or export correctly
+- Differences between the browser and the Clay canvas
+- Drag and drop, history, saving, or file-sync problems
+- Windows and Linux adaptation ideas
+- New translations and copy improvements
 
-提交问题时，请尽量附上 macOS 版本、操作步骤、预期结果和实际结果。涉及内部页面时，请先删除敏感信息。
+When reporting a problem, include your macOS version, steps to reproduce, expected behavior, and actual behavior. Remove sensitive information before sharing internal pages.
 
-## 路线图
+## Roadmap
 
-- 提供签名、公证的 macOS 安装包与 GitHub Releases
-- 扩大复杂 CSS、Tailwind 配置和动态页面的保真覆盖
-- 完善 Windows / Linux 支持
-- 建立更完整的贡献指南与开源发布流程
+- Signed and notarized macOS builds through GitHub Releases
+- Broader fidelity coverage for complex CSS, Tailwind configurations, and dynamic pages
+- Windows and Linux support
+- A more complete contribution guide and open-source release process
 
-## 许可证
+## License
 
-Clay 使用 [MIT License](./LICENSE) 开源。你可以使用、复制、修改、合并、发布和分发本项目，但需要保留原始版权与许可证声明。
+Clay is open source under the [MIT License](./LICENSE). You may use, copy, modify, merge, publish, and distribute the project as long as the original copyright and license notice are retained.
 
 ---
 
-如果 Clay 对你有帮助，欢迎点一个 ⭐，也欢迎带着真实页面来提出问题。
+If Clay is useful to you, consider leaving a ⭐ or bringing a real page to the issue tracker.
