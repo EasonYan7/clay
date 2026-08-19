@@ -12,6 +12,7 @@
  * 副产品:导出结果对开发者更好读——上半是你原来的样式,下半是被改了什么。
  */
 (function () {
+  const t = (key, vars) => window.ClayI18n.t(key, vars);
   // 画布里 Tailwind Play CDN 现场编译出的 CSS(特征:含 --tw- 变量且体量大)
   function extractTailwindCss(editor) {
     try {
@@ -110,7 +111,7 @@
     if (isTailwind && !(structured && hasTailwindRuntime(doc.headNodes))) {
       const twCss = extractTailwindCss(editor);
       if (twCss) {
-        twBlock = '  <style>\n/* Tailwind(静态提取,离线可用) */\n' + twCss + '\n  </style>';
+        twBlock = '  <style>\n/* ' + t('export.commentTailwind') + ' */\n' + twCss + '\n  </style>';
       } else {
         twBlock = '  <script src="https://cdn.tailwindcss.com"></script>';
         usedCdnFallback = true;
@@ -123,13 +124,13 @@
       (doc.headNodes || []).forEach((n) => { if (n && n.html) headBlocks.push('  ' + n.html); });
     } else if (originalCss) {
       // 老工作区没有结构化 head,保持向后兼容。
-      headBlocks.push('  <style>\n/* 原始样式 */\n' + originalCss + '\n  </style>');
+      headBlocks.push('  <style>\n/* ' + t('export.commentOriginal') + ' */\n' + originalCss + '\n  </style>');
       const metaLines = (doc.headMeta || []).concat(doc.headLinks || []);
       metaLines.forEach((m) => headBlocks.push('  ' + m));
     }
     if (twBlock) headBlocks.push(twBlock);
     if (clayCss) {
-      headBlocks.push('  <style>\n/* Clay 中调整的部分 */\n' + clayCss + '\n  </style>');
+      headBlocks.push('  <style>\n/* ' + t('export.commentClay') + ' */\n' + clayCss + '\n  </style>');
     }
 
     const title = doc.docTitle || doc.name || 'Untitled';
@@ -165,18 +166,16 @@
   function exportNote(doc, usedCdnFallback) {
     const parts = [];
     if (doc.isTailwind) {
-      parts.push(usedCdnFallback
-        ? 'Tailwind 样式提取失败,已回退为联网运行时(打开需联网)。'
-        : 'Tailwind 样式已静态内联,离线可直接打开。');
+      parts.push(usedCdnFallback ? t('export.tailwindFallback') : t('export.tailwindInline'));
     } else {
-      parts.push('完整独立的 HTML 文件,双击即可打开。');
+      parts.push(t('export.standalone'));
     }
     // 只在真有原始样式时才这么说,否则是空话
     if ((doc.styleText || '').trim()) {
-      parts.push('原始 CSS 原样保留,你在 Clay 里的调整单独列成一段。');
+      parts.push(t('export.cssPreserved'));
     }
     if (doc.scripts && doc.scripts.length) {
-      parts.push('导入时暂存的 ' + doc.scripts.length + ' 段交互脚本已还原。');
+      parts.push(t('export.scriptsRestored', { count: doc.scripts.length }));
     }
     return parts.join(' ');
   }

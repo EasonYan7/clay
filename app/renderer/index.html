@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh">
+<html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -10,7 +10,7 @@
 <body>
   <div id="app">
     <header id="topbar">
-      <button id="btn-home" class="brand" title="返回主页">
+      <button id="btn-home" class="brand" title="返回主页" data-i18n-title="toolbar.home">
         <span class="brand-logo"></span>
         <span class="brand-name">Clay</span>
       </button>
@@ -18,25 +18,29 @@
       <div class="tb-divider"></div>
 
       <div class="segmented" id="device-seg">
-        <button class="seg-item active" data-device="desktop" title="桌面"></button>
-        <button class="seg-item" data-device="tablet" title="平板"></button>
-        <button class="seg-item" data-device="mobile" title="手机"></button>
+        <button class="seg-item active" data-device="desktop" title="桌面" data-i18n-title="toolbar.desktop"></button>
+        <button class="seg-item" data-device="tablet" title="平板" data-i18n-title="toolbar.tablet"></button>
+        <button class="seg-item" data-device="mobile" title="手机" data-i18n-title="toolbar.mobile"></button>
       </div>
 
       <div class="tb-group">
-        <button id="btn-undo" class="icon-btn" title="撤销  ⌘Z"></button>
-        <button id="btn-redo" class="icon-btn" title="重做  ⇧⌘Z"></button>
+        <button id="btn-undo" class="icon-btn" title="撤销  ⌘Z" data-i18n-title="toolbar.undo"></button>
+        <button id="btn-redo" class="icon-btn" title="重做  ⇧⌘Z" data-i18n-title="toolbar.redo"></button>
       </div>
 
       <div class="tb-group">
-        <button id="btn-preview" class="icon-btn" title="预览"></button>
+        <button id="btn-preview" class="icon-btn" title="预览" data-i18n-title="toolbar.preview"></button>
       </div>
 
       <div class="tb-spacer"></div>
 
-      <button id="btn-theme" class="icon-btn" title="切换主题"></button>
-      <button id="btn-save" class="btn btn-primary" title="保存到源文件  ⌘S">
-        <span class="btn-ic"></span>保存<span id="save-dot" hidden></span>
+      <div class="locale-switch" role="group" aria-label="界面语言" data-i18n-aria-label="locale.label">
+        <button type="button" data-locale="zh-CN" title="中文" data-i18n-title="locale.zh">中</button>
+        <button type="button" data-locale="en-US" title="English" data-i18n-title="locale.en">EN</button>
+      </div>
+      <button id="btn-theme" class="icon-btn" title="切换主题" data-i18n-title="toolbar.theme"></button>
+      <button id="btn-save" class="btn btn-primary" title="保存到源文件  ⌘S" data-i18n-title="toolbar.save">
+        <span class="btn-ic"></span><span data-i18n="common.save">保存</span><span id="save-dot" hidden></span>
       </button>
       <button id="btn-export-pdf" class="btn btn-soft" title="导出 PDF  ⌘P">
         <span class="btn-ic"></span>PDF
@@ -45,39 +49,39 @@
 
     <nav id="doctabs" hidden>
       <div id="tabs-list"></div>
-      <button id="btn-newtab" class="tab-add" title="打开 HTML 文件  ⌘O"></button>
+      <button id="btn-newtab" class="tab-add" title="打开 HTML 文件  ⌘O" data-i18n-title="toolbar.open"></button>
     </nav>
 
     <div id="workspace">
       <aside id="sidebar">
         <div id="selection-bar">
-          <span id="selection-name" class="muted">未选中元素</span>
-          <button id="btn-select-parent" class="ghost-btn" title="选中上一层容器" hidden>上一层</button>
+          <span id="selection-name" class="muted" data-i18n="sidebar.noneSelected">未选中元素</span>
+          <button id="btn-select-parent" class="ghost-btn" title="选中上一层容器" data-i18n-title="sidebar.selectParent" hidden>上一层</button>
         </div>
         <nav id="sidebar-tabs">
-          <button class="tab active" data-tab="style"><span class="tab-ic"></span>样式</button>
-          <button class="tab" data-tab="layers"><span class="tab-ic"></span>图层</button>
-          <button class="tab" data-tab="history"><span class="tab-ic"></span>历史</button>
+          <button class="tab active" data-tab="style"><span class="tab-ic"></span><span data-i18n="sidebar.style">样式</span></button>
+          <button class="tab" data-tab="layers"><span class="tab-ic"></span><span data-i18n="sidebar.layers">图层</span></button>
+          <button class="tab" data-tab="history"><span class="tab-ic"></span><span data-i18n="sidebar.history">历史</span></button>
         </nav>
         <div class="tab-pane active" id="pane-style">
           <div id="style-hint" class="pane-hint">
-            <p>点击画布中的元素开始编辑。</p>
+            <p data-i18n="sidebar.styleHint">点击画布中的元素开始编辑。</p>
             <ul class="hint-list">
-              <li>双击文字 — 直接改内容</li>
-              <li>双击图片 — 换一张图</li>
-              <li>按住元素拖动 — 挪到别处</li>
+              <li data-i18n="sidebar.editText">双击文字 — 直接改内容</li>
+              <li data-i18n="sidebar.editImage">双击图片 — 换一张图</li>
+              <li data-i18n="sidebar.drag">按住元素拖动 — 挪到别处</li>
             </ul>
           </div>
           <div id="apply-similar-bar" hidden>
             <button id="btn-apply-similar" class="btn btn-soft btn-block"></button>
-            <div class="apply-hint">默认只改当前这一个,不影响长得一样的其它元素。</div>
+            <div class="apply-hint" data-i18n="sidebar.applyHint">默认只改当前这一个，不影响长得一样的其它元素。</div>
           </div>
           <div id="el-info" hidden>
-            <div class="info-row"><span>尺寸</span><b id="info-size"></b></div>
-            <div class="info-row"><span>字号 / 粗细</span><b id="info-font"></b></div>
-            <div class="info-row"><span>文字色</span><b class="swatch-val"><i id="info-color-sw"></i><span id="info-color"></span></b></div>
-            <div class="info-row"><span>背景</span><b class="swatch-val"><i id="info-bg-sw"></i><span id="info-bg"></span></b></div>
-            <div class="info-row"><span>圆角</span><b id="info-radius"></b></div>
+            <div class="info-row"><span data-i18n="sidebar.size">尺寸</span><b id="info-size"></b></div>
+            <div class="info-row"><span data-i18n="sidebar.font">字号 / 粗细</span><b id="info-font"></b></div>
+            <div class="info-row"><span data-i18n="sidebar.textColor">文字色</span><b class="swatch-val"><i id="info-color-sw"></i><span id="info-color"></span></b></div>
+            <div class="info-row"><span data-i18n="sidebar.background">背景</span><b class="swatch-val"><i id="info-bg-sw"></i><span id="info-bg"></span></b></div>
+            <div class="info-row"><span data-i18n="sidebar.radius">圆角</span><b id="info-radius"></b></div>
           </div>
           <div id="style-mount"></div>
           <div id="selector-mount" hidden></div>
@@ -88,10 +92,10 @@
         </div>
         <div class="tab-pane" id="pane-history">
           <div class="pane-hint" id="history-hint">
-            <p>你的每一步修改都记在这里。</p>
+            <p data-i18n="sidebar.historyHint">你的每一步修改都记在这里。</p>
             <ul class="hint-list">
-              <li>点任意一条 — 回到那个时刻</li>
-              <li>回去之后再改 — 之后的记录被替换</li>
+              <li data-i18n="sidebar.historyJump">点任意一条 — 回到那个时刻</li>
+              <li data-i18n="sidebar.historyReplace">回去之后再改 — 之后的记录被替换</li>
             </ul>
           </div>
           <div id="history-mount"></div>
@@ -104,32 +108,32 @@
           <div class="empty-card">
             <div class="empty-left">
               <div class="empty-mark"></div>
-              <h1>把 AI 生成的页面<br>变成<em>可编辑的画布</em></h1>
-              <p>打开或粘贴 AI 生成的 HTML，<br>自由调整内容与样式，再导出干净的代码。</p>
+              <h1 data-i18n-html="home.titleHtml">把 AI 生成的页面<br>变成<em>可编辑的画布</em></h1>
+              <p data-i18n-html="home.subtitleHtml">打开或粘贴 AI 生成的 HTML，<br>自由调整内容与样式，再导出干净的代码。</p>
 
               <div class="empty-actions">
                 <button class="btn btn-lg btn-sketch" id="btn-empty-import">
-                  <span class="btn-ic"></span>打开 HTML 文件
+                  <span class="btn-ic"></span><span data-i18n="home.open">打开 HTML 文件</span>
                   <span class="btn-kbd">⌘O</span>
                 </button>
               </div>
-              <button class="link-btn" id="btn-paste-code">或粘贴一段 HTML 代码</button>
+              <button class="link-btn" id="btn-paste-code" data-i18n="home.paste">或粘贴一段 HTML 代码</button>
 
               <div class="empty-samples">
-                <span class="samples-label">或者先玩玩示例</span>
+                <span class="samples-label" data-i18n="home.samples">或者先玩玩示例</span>
                 <div class="sample-cards">
                   <button class="sample-card" data-sample="tailwind">
                     <span class="sc-thumb sc-dark"><i></i></span>
                     <span class="sc-body">
-                      <span class="sc-name">深色落地页</span>
-                      <span class="sc-meta">Tailwind · 深色</span>
+                      <span class="sc-name" data-i18n="home.sampleDark">深色落地页</span>
+                      <span class="sc-meta" data-i18n="home.sampleDarkMeta">Tailwind · 深色</span>
                     </span>
                   </button>
                   <button class="sample-card" data-sample="plaincss">
                     <span class="sc-thumb sc-light"><i></i></span>
                     <span class="sc-body">
-                      <span class="sc-name">品牌官网</span>
-                      <span class="sc-meta">原生 CSS · 浅色</span>
+                      <span class="sc-name" data-i18n="home.sampleBrand">品牌官网</span>
+                      <span class="sc-meta" data-i18n="home.sampleBrandMeta">原生 CSS · 浅色</span>
                     </span>
                   </button>
                 </div>
@@ -147,17 +151,17 @@
   <div class="modal-backdrop" id="import-modal" hidden>
     <div class="modal">
       <div class="modal-head">
-        <h3>导入页面</h3>
+        <h3 data-i18n="import.title">导入页面</h3>
         <button class="icon-btn modal-x" data-close></button>
       </div>
-      <p class="modal-sub">把 AI 工具生成的 HTML 代码整段粘贴到下面。若本地已有文件,用「打开 HTML 文件」更方便。</p>
+      <p class="modal-sub" data-i18n="import.subtitle">把 AI 生成的 HTML 代码整段粘贴到下面。若本地已有文件，用「打开 HTML 文件」更方便。</p>
       <textarea id="import-textarea" placeholder="<!DOCTYPE html> …" spellcheck="false"></textarea>
       <div class="modal-foot">
-        <button id="btn-open-file" class="btn btn-soft"><span class="btn-ic"></span>改用打开文件…</button>
+        <button id="btn-open-file" class="btn btn-soft"><span class="btn-ic"></span><span data-i18n="import.openInstead">改用打开文件…</span></button>
         <span class="modal-note" id="import-note"></span>
         <div class="modal-actions">
-          <button class="btn btn-soft" data-close>取消</button>
-          <button id="btn-do-import" class="btn btn-primary">导入</button>
+          <button class="btn btn-soft" data-close data-i18n="common.cancel">取消</button>
+          <button id="btn-do-import" class="btn btn-primary" data-i18n="import.action">导入</button>
         </div>
       </div>
     </div>
@@ -170,12 +174,13 @@
   <div id="drop-overlay" hidden>
     <div class="drop-card">
       <span class="drop-ic"></span>
-      <p>松开鼠标,打开这个 HTML 文件</p>
+      <p data-i18n="drop.html">松开鼠标，打开这个 HTML 文件</p>
     </div>
   </div>
 
   <div id="toast" hidden></div>
 
+  <script src="i18n.js?v=1"></script>
   <script src="vendor/grapes.min.js"></script>
   <script src="icons.js?v=49"></script>
   <script src="samples.js?v=49"></script>

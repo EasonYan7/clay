@@ -2,6 +2,7 @@
 (function () {
   const $ = (s) => document.querySelector(s);
   const $$ = (s) => [...document.querySelectorAll(s)];
+  const t = (key, vars) => window.ClayI18n.t(key, vars);
 
   /* 取色器配置:交给底座内置的 spectrum。
    * 色板偏 Tailwind 常用值(AI 页面多用它),按"中性灰阶 / 红橙 / 绿青 / 蓝紫 / 粉玫"分行,
@@ -26,12 +27,12 @@
     allowEmpty: true,                // 可清空成无色
     clickoutFiresChange: true,       // 点外面即应用当前选择
     preferredFormat: 'hex',
-    chooseText: '确定',
-    cancelText: '取消',
-    clearText: '清除颜色',
-    noColorSelectedText: '未选择颜色',
-    togglePaletteMoreText: '更多',
-    togglePaletteLessText: '收起',
+    chooseText: window.ClayI18n.getLocale() === 'en-US' ? 'Choose' : '确定',
+    cancelText: t('common.cancel'),
+    clearText: window.ClayI18n.getLocale() === 'en-US' ? 'Clear color' : '清除颜色',
+    noColorSelectedText: window.ClayI18n.getLocale() === 'en-US' ? 'No color selected' : '未选择颜色',
+    togglePaletteMoreText: window.ClayI18n.getLocale() === 'en-US' ? 'More' : '更多',
+    togglePaletteLessText: window.ClayI18n.getLocale() === 'en-US' ? 'Less' : '收起',
   };
 
   let editor = null;
@@ -96,7 +97,7 @@
       try { localStorage.setItem(STORE_KEY, json); ok = true; } catch (e) { ok = false; }
     }
     cleanExitCommitted = ok;
-    if (!ok) toast('退出状态保存失败,已留在 Clay');
+    if (!ok) toast(t('status.exitStateFailed'));
     return ok;
   }
 
@@ -107,7 +108,7 @@
     if (hasDisk) {
       const r = await window.clay.saveWorkspace(json);
       if (!r || !r.ok) {
-        if (!persistWarned) { persistWarned = true; toast('自动保存失败,请及时导出:' + (r && r.error || '')); }
+        if (!persistWarned) { persistWarned = true; toast(t('status.autoSaveFailed', { error: r && r.error || '' })); }
       } else {
         persistWarned = false;
       }
@@ -116,7 +117,7 @@
     try {
       localStorage.setItem(STORE_KEY, json);
     } catch (e) {
-      if (!persistWarned) { persistWarned = true; toast('自动保存失败:内容超出浏览器存储上限,请及时导出'); }
+      if (!persistWarned) { persistWarned = true; toast(t('status.storageFull')); }
     }
   }
 
@@ -173,7 +174,7 @@
   async function openRecent(path) {
     if (!(window.clay && window.clay.readPath)) return;
     const f = await window.clay.readPath(path);
-    if (!f) { toast('打不开:文件可能已被移动或删除'); removeRecent(path); return; }
+    if (!f) { toast(t('status.fileUnavailable')); removeRecent(path); return; }
     runImport(f.content, f.name.replace(/\.html?$/i, ''), f.path);
   }
 
@@ -213,7 +214,7 @@
     if (!list.length) return;
     const head = document.createElement('div');
     head.className = 'recent-head';
-    head.textContent = '最近编辑';
+    head.textContent = t('recent.title');
     mount.appendChild(head);
     const grid = document.createElement('div');
     grid.className = 'recent-grid';
@@ -227,11 +228,11 @@
       c.innerHTML = '<span class="rc-ic">' + window.icon('file', 15) + '</span>' +
         '<span class="rc-name"></span>' +
         '<span class="rc-path"></span>' +
-        '<span class="rc-remove" title="从最近移除">' + window.icon('close', 11) + '</span>';
+        '<span class="rc-remove" title="' + t('recent.remove') + '">' + window.icon('close', 11) + '</span>';
       const nameEl = c.querySelector('.rc-name');
       nameEl.textContent = r.name || r.path.split('/').pop();
       nameEl.title = nameEl.textContent;   // 截断后仍能悬停看到完整文件名
-      c.querySelector('.rc-path').textContent = prettyDir(r.path) || '本地文件';
+      c.querySelector('.rc-path').textContent = prettyDir(r.path) || t('recent.local');
       c.onclick = (e) => {
         if (e.target.closest('.rc-remove')) { removeRecent(r.path); return; }
         openRecent(r.path);
@@ -410,6 +411,28 @@
     },
   ];
 
+  const sectorKeys = ['text', 'background', 'border', 'spacing', 'size', 'layout', 'effects'];
+  function localizeStyleSchema() {
+    const visit = (property) => {
+      if (!property) return;
+      const propKey = 'style.prop.' + property.property;
+      const propLabel = t(propKey);
+      if (propLabel !== propKey) property.name = propLabel;
+      (property.options || []).forEach((option) => {
+        if (!option.id) { option.label = t('style.default'); return; }
+        const optionKey = 'style.option.' + option.id;
+        const optionLabel = t(optionKey);
+        if (optionLabel !== optionKey) option.label = optionLabel;
+      });
+      (property.properties || []).forEach(visit);
+    };
+    SECTORS.forEach((sector, index) => {
+      sector.name = t('style.sector.' + sectorKeys[index]);
+      sector.properties.forEach(visit);
+    });
+  }
+  localizeStyleSchema();
+
   /* ── 编辑器创建/重建 ─────────────────────── */
   function enableEditableTableCells(ed) {
     const cells = ed.DomComponents;
@@ -457,9 +480,9 @@
       traitManager: { appendTo: '#traits-mount' },
       deviceManager: {
         devices: [
-          { id: 'desktop', name: '桌面', width: '' },
-          { id: 'tablet', name: '平板', width: '768px', widthMedia: '992px' },
-          { id: 'mobile', name: '手机', width: '375px', widthMedia: '480px' },
+          { id: 'desktop', name: t('toolbar.desktop'), width: '' },
+          { id: 'tablet', name: t('toolbar.tablet'), width: '768px', widthMedia: '992px' },
+          { id: 'mobile', name: t('toolbar.mobile'), width: '375px', widthMedia: '480px' },
         ],
       },
       canvas: { scripts: tailwind ? ['vendor/tailwind-play.js'] : [] },
@@ -626,10 +649,10 @@
    * 按 toolbar 模型里的 command 认人,而不是认图标或位置 ——
    * 不同组件类型的按钮数量会变(第一个"选父级"在模型里没有 command)。 */
   const TOOLBAR_TIPS = {
-    'tlb-move': '按住拖动',
-    'tlb-clone': '同级复制',
-    'clay:add-empty': '下方加空白同类',
-    'tlb-delete': '删除',
+    'tlb-move': t('toolbarTip.move'),
+    'tlb-clone': t('toolbarTip.clone'),
+    'clay:add-empty': t('toolbarTip.add'),
+    'tlb-delete': t('toolbarTip.delete'),
   };
 
   function tipForToolbarItem(el) {
@@ -640,7 +663,7 @@
     const model = (sel && sel.get('toolbar')) || [];
     const cmd = model[idx] && model[idx].command;
     if (typeof cmd === 'string' && TOOLBAR_TIPS[cmd]) return TOOLBAR_TIPS[cmd];
-    return idx === 0 ? '选中上一层' : '';   // 首位固定是"选父级",模型里不带 command
+    return idx === 0 ? t('toolbarTip.parent') : '';   // 首位固定是"选父级",模型里不带 command
   }
 
   function enableToolbarTips() {
@@ -716,12 +739,12 @@
         const classes = (sel.getClasses && sel.getClasses().slice()) || [];
         const def = { tagName: tag, classes };
         // 纯空的文本元素高度为 0、看不见也点不到,给个占位字方便双击替换;容器类才真的留空
-        if (TEXT_TAGS.indexOf(tag) > -1) def.content = '新' + (baseTextName(tag));
+        if (TEXT_TAGS.indexOf(tag) > -1) def.content = t('element.new', { name: baseTextName(tag) });
         const at = (typeof sel.index === 'function' ? sel.index() : 0) + 1;
         const added = parent.append(def, { at })[0];
         if (added) {
           // 给个中文名,图层树和历史里显示"标题/文本/容器"而不是"H1/DIV"
-          added.set('custom-name', TEXT_TAGS.indexOf(tag) > -1 ? baseTextName(tag) : (sel.get('custom-name') || '容器'));
+          added.set('custom-name', TEXT_TAGS.indexOf(tag) > -1 ? baseTextName(tag) : (sel.get('custom-name') || t('element.container')));
           editor.select(added);
           const el = added.getEl && added.getEl();
           if (el && el.scrollIntoView) el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
@@ -744,11 +767,11 @@
 
   // 给占位文案起个贴切的词
   function baseTextName(tag) {
-    if (/^h[1-6]$/.test(tag)) return '标题';
-    if (tag === 'a') return '链接';
-    if (tag === 'button') return '按钮';
-    if (tag === 'li') return '列表项';
-    return '文本';
+    if (/^h[1-6]$/.test(tag)) return t('element.heading');
+    if (tag === 'a') return t('element.link');
+    if (tag === 'button') return t('element.button');
+    if (tag === 'li') return t('element.listItem');
+    return t('element.text');
   }
 
   /* 自研吸附拖拽:按住元素直接拖动,紫色指示线提示落点,
@@ -953,7 +976,7 @@
         const active = drag;
         if (active && commit && active.drop) {
           active.comp.move(active.drop.parent, { at: active.drop.at }); // at 采用移动前的原始索引语义
-          toast('已移动「' + active.comp.getName() + '」');
+          toast(t('status.moved', { name: active.comp.getName() }));
         }
         drawLine(null);
         if (active) {
@@ -1076,7 +1099,7 @@
       const isPng = file.type === 'image/png';
       cb(cv.toDataURL(isPng ? 'image/png' : 'image/jpeg', 0.85), true);
     };
-    img.onerror = () => { URL.revokeObjectURL(url); toast('读取图片失败'); };
+    img.onerror = () => { URL.revokeObjectURL(url); toast(t('status.imageReadFailed')); };
     img.src = url;
   }
 
@@ -1093,7 +1116,7 @@
           if (!file) return;
           compressImage(file, (dataUrl, compressed) => {
             target.set('src', dataUrl);
-            toast(compressed ? '图片已替换(已压缩,便于导出)' : '图片已替换');
+            toast(t(compressed ? 'status.imageReplacedCompressed' : 'status.imageReplaced'));
           });
         };
         input.click();
@@ -1125,7 +1148,7 @@
     const similarBar = $('#apply-similar-bar');
     const hint = $('#style-hint');
     if (!sel || sel === editor.getWrapper()) {
-      nameEl.textContent = '未选中元素';
+      nameEl.textContent = t('selection.none');
       nameEl.classList.add('muted');
       parentBtn.hidden = true;
       similarBar.hidden = true;
@@ -1140,7 +1163,7 @@
     $('#style-mount').style.display = '';
     const similar = findSimilar(sel);
     if (similar.length) {
-      $('#btn-apply-similar').textContent = `把修改应用到 ${similar.length} 个同款元素`;
+      $('#btn-apply-similar').textContent = t('selection.applySimilar', { count: similar.length });
       similarBar.hidden = false;
     } else {
       similarBar.hidden = true;
@@ -1153,7 +1176,7 @@
   function rgb2hex(v) {
     const m = v && v.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)/);
     if (!m) return v || '';
-    if (m[4] !== undefined && parseFloat(m[4]) === 0) return '透明';
+    if (m[4] !== undefined && parseFloat(m[4]) === 0) return t('style.transparent');
     const hex = '#' + [1, 2, 3].map((i) => (+m[i]).toString(16).padStart(2, '0')).join('');
     return m[4] !== undefined && parseFloat(m[4]) < 1
       ? hex + ' ' + Math.round(parseFloat(m[4]) * 100) + '%' : hex;
@@ -1203,7 +1226,7 @@
   function setSwatch(swId, txtId, val) {
     const sw = $(swId), txt = $(txtId);
     txt.textContent = val || '—';
-    sw.style.background = (!val || val === '透明') ? 'transparent' : val.split(' ')[0];
+    sw.style.background = (!val || val === t('style.transparent')) ? 'transparent' : val.split(' ')[0];
   }
 
   /* 输入即生效:GrapesJS 默认只在失焦时提交(回车都不认),对非技术用户很不直观。
@@ -1281,7 +1304,7 @@
       const select = propEl.querySelector('.gjs-field-select select');
       if (select && !select.classList.contains('gjs-input-unit')) {
         const defOpt = [...select.options].find((o) => !o.value);
-        if (defOpt) defOpt.textContent = val ? '默认 · ' + val : '默认';
+        if (defOpt) defOpt.textContent = val ? t('style.default') + ' · ' + val : t('style.default');
       }
     });
     // 2) 信息卡
@@ -1289,13 +1312,13 @@
     $('#info-size').textContent = Math.round(r.width) + ' × ' + Math.round(r.height) + ' px';
     $('#info-font').textContent = map['font-size'] + ' / ' + map['font-weight'];
     setSwatch('#info-color-sw', '#info-color', map['color']);
-    if (map['background-color'] === '透明' && map['background-image']) {
-      $('#info-bg').textContent = map['background-image'].indexOf('gradient') > -1 ? '渐变' : '图片';
+    if (map['background-color'] === t('style.transparent') && map['background-image']) {
+      $('#info-bg').textContent = map['background-image'].indexOf('gradient') > -1 ? t('style.gradient') : t('style.image');
       $('#info-bg-sw').style.background = map['background-image'];
     } else {
       setSwatch('#info-bg-sw', '#info-bg', map['background-color']);
     }
-    $('#info-radius').textContent = map['border-radius'] === '0px' ? '无' : map['border-radius'];
+    $('#info-radius').textContent = map['border-radius'] === '0px' ? t('style.none') : map['border-radius'];
     info.hidden = false;
   }
 
@@ -1319,12 +1342,12 @@
     docs.forEach((d) => {
       const tab = document.createElement('button');
       tab.className = 'doc-tab' + (d.id === activeDocId ? ' active' : '');
-      tab.title = d.name + (d.externalConflict ? ' — 外部文件已更新,Clay 修改尚未覆盖' : '');
+      tab.title = d.name + (d.externalConflict ? ' — ' + t('tab.conflict') : '');
       tab.dataset.id = d.id;
       tab.innerHTML = window.icon('file', 13) +
         '<span class="dt-name"></span>' +
-        (d.dirty ? '<span class="dt-dot" title="有未保存的修改"></span>' : '') +
-        '<span class="dt-close" title="关闭">' + window.icon('close', 11) + '</span>';
+        (d.dirty ? '<span class="dt-dot" title="' + t('tab.dirty') + '"></span>' : '') +
+        '<span class="dt-close" title="' + t('tab.close') + '">' + window.icon('close', 11) + '</span>';
       tab.querySelector('.dt-name').textContent = d.name;
       tab.onclick = (e) => {
         if (tab.dataset.dragged === '1') { tab.dataset.dragged = ''; return; }  // 拖完别顺手触发点击
@@ -1445,7 +1468,7 @@
     document.body.classList.toggle('light', light);
     if (btn) {
       btn.innerHTML = window.icon(light ? 'moon' : 'sun');
-      btn.title = light ? '切到深色' : '切到浅色';
+      btn.title = t(light ? 'theme.toDark' : 'theme.toLight');
     }
   }
 
@@ -1493,11 +1516,11 @@
    * 必然互相挤开 → 箭头交叉指错。现在靠 row 错开,箭头短且一一对应。
    * 撤销/重做在空状态没意义,不标注,顺带给左侧腾出间距。 */
   const SKETCH_NOTES = [
-    { sel: '#btn-home',    text: '点这儿随时回来', row: 0 },
-    { sel: '#device-seg',  text: '换设备看效果',   row: 1 },
-    { sel: '#btn-preview', text: '全屏预览',       row: 0 },
-    { sel: '#btn-theme',   text: '深色/浅色',      row: 0 },
-    { sel: '#btn-save',    text: '改完存回文件',   row: 1 },
+    { sel: '#btn-home',    text: window.ClayI18n.getLocale() === 'en-US' ? 'Home, anytime' : '点这儿随时回来', row: 0 },
+    { sel: '#device-seg',  text: window.ClayI18n.getLocale() === 'en-US' ? 'Try another device' : '换设备看效果', row: 1 },
+    { sel: '#btn-preview', text: window.ClayI18n.getLocale() === 'en-US' ? 'Full preview' : '全屏预览', row: 0 },
+    { sel: '#btn-theme',   text: window.ClayI18n.getLocale() === 'en-US' ? 'Light / Dark' : '深色/浅色', row: 0 },
+    { sel: '#btn-save',    text: window.ClayI18n.getLocale() === 'en-US' ? 'Save it back' : '改完存回文件', row: 1 },
   ];
 
   // 确定性抖动:同一坐标每次算出同一个偏移,重绘时线条不会乱跳
@@ -1622,11 +1645,11 @@
       const hasSrc = !!d.sourcePath;
       const r = await confirmBox({
         type: 'question',
-        message: hasSrc ? `「${d.name}」有未保存的修改` : `「${d.name}」还没有保存成文件`,
+        message: t(hasSrc ? 'dialog.closeDirty' : 'dialog.closeUnsaved', { name: d.name }),
         detail: hasSrc
-          ? `关闭前要把修改保存到 ${d.sourcePath.split('/').pop()} 吗?`
-          : '不保存的话,这个页面和你做的修改会一起消失。',
-        buttons: [hasSrc ? '保存' : '存为文件…', '不保存', '取消'],
+          ? t('dialog.closeSaveDetail', { file: d.sourcePath.split('/').pop() })
+          : t('dialog.closeDiscardDetail'),
+        buttons: [hasSrc ? t('common.save') : t('dialog.saveFile'), t('dialog.discard'), t('common.cancel')],
         defaultId: 0,
         cancelId: 2,
       });
@@ -1726,11 +1749,11 @@
       setDevice(device);
       syncThemeToPage(ed, d);
       persist();
-      toast('检测到外部修改,已刷新 ' + d.sourcePath.split('/').pop());
+      toast(t('status.externalReloaded', { file: d.sourcePath.split('/').pop() }));
       return true;
     } catch (err) {
       histSuppressed = false;
-      toast('外部文件已变化,但刷新失败;Clay 已保留当前画布');
+      toast(t('status.externalReloadFailed'));
       return false;
     }
   }
@@ -1740,14 +1763,14 @@
     if (!d || !d.sourcePath || !change || change.path !== d.sourcePath) return;
 
     if (change.exists === null) {
-      toast('无法继续监听源文件;当前画布不受影响');
+      toast(t('status.watchFailed'));
       return;
     }
     if (change.exists === false) {
       d.externalConflict = { missing: true };
       renderTabs();
       persist();
-      toast('源文件已被移动或删除;Clay 已保留当前画布');
+      toast(t('status.sourceMissing'));
       return;
     }
 
@@ -1770,9 +1793,9 @@
 
     const r = await confirmBox({
       type: 'warning',
-      message: '源文件被其他软件修改了',
-      detail: 'Clay 里也有尚未保存的修改。载入外部版本会丢弃 Clay 中的修改;保留 Clay 版本则不会改动画布。',
-      buttons: ['保留 Clay 修改', '载入外部版本'],
+      message: t('dialog.externalChanged'),
+      detail: t('dialog.externalDetail'),
+      buttons: [t('dialog.keepClay'), t('dialog.loadExternal')],
       defaultId: 0,
       cancelId: 0,
     });
@@ -1785,7 +1808,7 @@
     d.externalConflict = { missing: false, hash: incomingHash };
     renderTabs();
     persist();
-    toast('已保留 Clay 修改;保存到源文件前会再次确认');
+    toast(t('status.keptClay'));
   }
 
   async function queueSourceChange(change) {
@@ -1830,20 +1853,20 @@
     const changed = existing.sourceHash ? existing.sourceHash !== hashOf(raw) : false;
     if (!changed) {
       activateDoc(existing.id);
-      toast('这个页面已经打开了,已切过去');
+      toast(t('status.alreadyOpen'));
       return true;
     }
     const r = await confirmBox({
       type: 'question',
-      message: '这个文件已经在 Clay 里打开了,但磁盘上的版本已经变了',
-      detail: '重新载入会用磁盘上的新版本替换,你在 Clay 里对它做的修改会丢失。',
-      buttons: ['切到已打开的', '重新载入(丢弃 Clay 里的修改)'],
+      message: t('dialog.duplicateChanged'),
+      detail: t('dialog.duplicateDetail'),
+      buttons: [t('dialog.switchExisting'), t('dialog.reloadDiscard')],
       defaultId: 0,
       cancelId: 0,
     });
     if (r !== 1) {
       activateDoc(existing.id);
-      toast('已切到打开着的那个');
+      toast(t('status.switchedExisting'));
       return true;
     }
     // 安静地摘掉旧的:不走 closeDoc,免得它顺手激活别的文档或跳回主页,
@@ -1887,7 +1910,7 @@
 
   async function importDroppedFiles(fileList) {
     const files = [...fileList].filter((f) => /\.html?$/i.test(f.name));
-    if (!files.length) { toast('只能拖 .html / .htm 文件'); return; }
+    if (!files.length) { toast(t('status.onlyHtml')); return; }
     // 依次导入,不并发 —— runImport 里可能弹"文件已打开/磁盘变了"确认框,
     // 并发跑会导致好几个确认框同时弹出、互相打架
     for (const f of files) {
@@ -1955,7 +1978,7 @@
   }
 
   async function runImport(raw, fileName, sourcePath, sampleKey) {
-    if (!raw || !raw.trim()) { toast('先粘贴 HTML 代码'); return; }
+    if (!raw || !raw.trim()) { toast(t('import.pasteFirst')); return; }
 
     // 身份:文件看路径,示例看名字,粘贴看内容指纹
     const sourceKey = sourcePath ? 'file:' + sourcePath
@@ -1989,7 +2012,7 @@
 
     const doc = {
       id: 'doc' + ++docSeq,
-      name: fileName || result.title || '未命名页面 ' + docSeq,
+      name: fileName || result.title || t('import.untitled', { count: docSeq }),
       isTailwind: result.isTailwind,
       scripts: result.scripts || [],
       sourcePath: sourcePath || '',   // 记住原文件,另存为时用来避开它
@@ -2029,8 +2052,8 @@
     $('#import-note').textContent = '';
     const bits = [];
     if (result.report.kept) bits.push(result.report.kept);
-    if (result.report.dropped.length) bits.push('已忽略:' + result.report.dropped.join('、'));
-    toast(bits.length ? '导入完成。' + bits.join(';') : '导入完成,点击任意元素开始编辑');
+    if (result.report.dropped.length) bits.push(t('import.ignored', { items: result.report.dropped.join('、') }));
+    toast(bits.length ? t('status.importDoneWithNotes', { notes: bits.join('; ') }) : t('status.importDone'));
     setDevice('desktop');
     persist();
     syncSourceWatch();
@@ -2040,7 +2063,7 @@
    * Word 语义:直接写回源文件。粘贴进来的没有源文件,第一次保存
    * 等于另存为,存完这个文档就"住"进那个文件,以后 ⌘S 直接写。 */
   async function saveToSource() {
-    if (!editor || !activeDocId) { toast('还没有可保存的页面'); return false; }
+    if (!editor || !activeDocId) { toast(t('status.nothingToSave')); return false; }
     const d = docs.find((x) => x.id === activeDocId);
     if (!d) return false;
     if (!d.sourcePath || !(window.clay && window.clay.writeFile)) return saveAsCopy();
@@ -2048,11 +2071,11 @@
     if (d.externalConflict) {
       const r = await confirmBox({
         type: 'warning',
-        message: d.externalConflict.missing ? '源文件已经不存在' : '源文件包含其他软件的新修改',
+        message: t(d.externalConflict.missing ? 'dialog.sourceMissing' : 'dialog.sourceChanged'),
         detail: d.externalConflict.missing
-          ? '继续保存会在原位置重新创建文件。也可以取消后使用“另存为”,保留两个版本。'
-          : '继续保存会用 Clay 当前版本覆盖外部修改。也可以取消后使用“另存为”,保留两个版本。',
-        buttons: ['取消', d.externalConflict.missing ? '重新创建并保存' : '仍然保存并覆盖'],
+          ? t('dialog.recreateDetail')
+          : t('dialog.overwriteDetail'),
+        buttons: [t('common.cancel'), t(d.externalConflict.missing ? 'dialog.recreate' : 'dialog.overwrite')],
         defaultId: 0,
         cancelId: 0,
       });
@@ -2061,7 +2084,7 @@
 
     const result = window.ClayExporter.build(editor, d);
     const r = await window.clay.writeFile(d.sourcePath, result.code);
-    if (!r || !r.ok) { toast('保存失败:' + ((r && r.error) || '未知错误')); return false; }
+    if (!r || !r.ok) { toast(t('status.saveFailed', { error: (r && r.error) || t('common.unknownError') })); return false; }
     d.dirty = false;
     d.sourceHash = hashOf(result.code);   // 磁盘上现在就是这份,别再误报"文件在磁盘上变了"
     delete d.externalConflict;
@@ -2069,7 +2092,7 @@
     renderTabs();
     persist();
     syncSourceWatch();   // 文件若曾被删除,本次保存重建后要重新接上目录监听
-    toast('已保存到 ' + d.sourcePath.split('/').pop());
+    toast(t('status.savedTo', { file: d.sourcePath.split('/').pop() }));
     return true;
   }
 
@@ -2077,7 +2100,7 @@
    * 源文件不动。默认名去掉已有的 -clay 再补一个,不然 A-clay 再另存
    * 会滚雪球成 A-clay-clay。存完按 Word 语义换住处:手上打开的就是新文件。 */
   async function saveAsCopy() {
-    if (!editor || !activeDocId) { toast('还没有可保存的页面'); return false; }
+    if (!editor || !activeDocId) { toast(t('status.nothingToSave')); return false; }
     const d = docs.find((x) => x.id === activeDocId);
     if (!d) return false;
     const result = window.ClayExporter.build(editor, d);
@@ -2101,7 +2124,7 @@
       renderTabs();
       persist();
       syncSourceWatch();
-      toast('已保存为 ' + p.split('/').pop() + ',之后 ⌘S 直接存到这里');
+      toast(t('status.savedAs', { file: p.split('/').pop() }));
       return true;
     }
     const blob = new Blob([result.code], { type: 'text/html' });
@@ -2109,7 +2132,7 @@
     a.href = URL.createObjectURL(blob);
     a.download = fname;
     a.click();
-    toast('已下载 ' + fname);
+    toast(t('status.downloaded', { file: fname }));
     return true;
   }
 
@@ -2141,31 +2164,31 @@
   }
 
   async function exportPdf() {
-    if (!editor || !activeDocId) { toast('还没有可导出的页面'); return; }
+    if (!editor || !activeDocId) { toast(t('status.nothingToExport')); return; }
     const d = docs.find((x) => x.id === activeDocId);
     if (!d) return;
-    if (!(window.clay && window.clay.exportPdf)) { toast('PDF 导出仅桌面版可用'); return; }
+    if (!(window.clay && window.clay.exportPdf)) { toast(t('status.pdfDesktopOnly')); return; }
     const result = window.ClayExporter.build(editor, d);
     const base = (d.name || 'page').replace(/[\/\\:*?"<>|]/g, '-').replace(/(-clay)+$/i, '').slice(0, 40);
-    toast('正在生成 PDF…');
+    toast(t('status.pdfGenerating'));
     // 相对路径图片(素材文件夹场景)要指回源目录 —— PDF 渲染用的临时文件不和原文件同目录,
     // 跟画布里那个问题是同一类,这里传源路径给主进程去插 base 修
     const r = await window.clay.exportPdf(base + '.pdf', result.code,
       currentExportWidth(), currentExportHeight(), d.sourcePath || '');
     if (!r) return;                                   // 用户取消了保存框
-    if (!r.ok) { toast('PDF 导出失败:' + (r.error || '未知错误')); return; }
-    toast('已导出 ' + r.path.split('/').pop());
+    if (!r.ok) { toast(t('status.pdfFailed', { error: r.error || t('common.unknownError') })); return; }
+    toast(t('status.pdfDone', { file: r.path.split('/').pop() }));
   }
 
   /* 给开发的交接通道:整页代码进剪贴板。代码从主流程里退场,
    * 不再把一屏源码怼到不看代码的人脸上。 */
   async function copyCode() {
-    if (!editor || !activeDocId) { toast('还没有可复制的页面'); return; }
+    if (!editor || !activeDocId) { toast(t('status.nothingToCopy')); return; }
     const d = docs.find((x) => x.id === activeDocId);
     if (!d) return;
     const result = window.ClayExporter.build(editor, d);
     await navigator.clipboard.writeText(result.code);
-    toast('整页代码已复制,可以直接发给开发');
+    toast(t('status.codeCopied'));
   }
 
   /* 一个撤销动作是不是"有意义的编辑"。
@@ -2288,12 +2311,13 @@
         const d = docs.find((x) => x.id === id);
         return d ? `「${d.name}」` : '';
       }).filter(Boolean);
-      const shown = names.slice(0, 3).join('、') + (names.length > 3 ? ` 等 ${names.length} 个页面` : '');
+      const shown = names.slice(0, 3).join(window.ClayI18n.getLocale() === 'en-US' ? ', ' : '、')
+        + (names.length > 3 ? (window.ClayI18n.getLocale() === 'en-US' ? ` and ${names.length - 3} more` : ` 等 ${names.length} 个页面`) : '');
       const response = await confirmBox({
         type: 'question',
-        message: dirtyIds.length === 1 ? `${shown}有未保存的修改` : `有 ${dirtyIds.length} 个页面尚未保存`,
-        detail: '“保存并退出”会逐一写回 HTML；“直接退出”会丢弃未保存修改，不写回源文件。',
-        buttons: ['保存并退出', '直接退出', '取消'],
+        message: t(dirtyIds.length === 1 ? 'dialog.exitOne' : 'dialog.exitMany', { names: shown, count: dirtyIds.length }),
+        detail: t('dialog.exitDetail'),
+        buttons: [t('dialog.saveExit'), t('dialog.quitDiscard'), t('common.cancel')],
         defaultId: 0,
         cancelId: 2,
       });
@@ -2320,7 +2344,7 @@
       snapshotActive();
       window.clay.respondToClose(commitClosedWorkspace());
     } catch (err) {
-      toast('退出前保存失败,已留在 Clay');
+      toast(t('status.closeSaveFailed'));
       window.clay.respondToClose(false);
     } finally {
       closePromptBusy = false;
@@ -2340,7 +2364,24 @@
     'min-height': '最小高度', display: '布局方式', 'flex-direction': '排列方向',
     'justify-content': '主轴对齐', 'align-items': '交叉对齐', gap: '间隔', position: '定位',
   };
+  const PROP_EN = {
+    'font-size': 'font size', 'font-weight': 'font weight', 'font-family': 'font', 'font-style': 'font style',
+    color: 'text color', 'text-align': 'alignment', 'line-height': 'line height', 'letter-spacing': 'letter spacing',
+    'text-decoration': 'decoration', 'background-color': 'background color', background: 'background',
+    'background-image': 'background image', 'border-radius': 'radius', 'box-shadow': 'shadow', opacity: 'opacity',
+    width: 'width', height: 'height', 'max-width': 'max width', 'min-height': 'min height', display: 'layout',
+    'flex-direction': 'direction', 'justify-content': 'main-axis alignment', 'align-items': 'cross-axis alignment',
+    gap: 'gap', position: 'position',
+  };
   function propZh(p) {
+    if (window.ClayI18n.getLocale() === 'en-US') {
+      if (PROP_EN[p]) return PROP_EN[p];
+      if (/^margin/.test(p)) return 'margin';
+      if (/^padding/.test(p)) return 'padding';
+      if (/^border/.test(p)) return 'border';
+      if (/^font|^text|^letter|^line/.test(p)) return 'typography';
+      return p;
+    }
     if (PROP_ZH[p]) return PROP_ZH[p];
     if (/^margin/.test(p)) return '外间距';
     if (/^padding/.test(p)) return '内间距';
@@ -2349,8 +2390,17 @@
     return p;
   }
   function compName(c) {
-    if (!c || !c.get) return '元素';
-    return c.get('custom-name') || (c.getName && c.getName()) || '元素';
+    if (!c || !c.get) return t('element.generic');
+    const name = c.get('custom-name') || (c.getName && c.getName()) || t('element.generic');
+    if (window.ClayI18n.getLocale() !== 'en-US') return name;
+    const legacy = {
+      页面: 'element.page', 页头: 'element.header', 导航: 'element.nav', 页脚: 'element.footer', 正文: 'element.main',
+      侧栏: 'element.aside', 列表: 'element.list', 列表项: 'element.listItem', 图片: 'element.image', 图标: 'element.icon',
+      按钮: 'element.button', 链接: 'element.link', 标题: 'element.heading', 文本: 'element.text', 文字: 'element.text',
+      区块: 'element.section', 表单: 'element.form', 输入框: 'element.input', 表格: 'element.table', 单元格: 'element.cell',
+      视频: 'element.video', 容器: 'element.container', 元素: 'element.generic',
+    };
+    return legacy[name] ? t(legacy[name]) : name;
   }
   // componentFirst 下样式改动落在 #id 规则上,从选择器倒查是哪个元素
   function ruleToComp(rule) {
@@ -2369,8 +2419,9 @@
     // 只报真正变了的属性 —— 规则的快照里还带着以前改过的旧属性,全列就是撒谎
     const props = Object.keys(Object.assign({}, bs, fs))
       .filter((p) => !/^__/.test(p) && String(bs[p]) !== String(fs[p]));
-    const names = [...new Set(props.map(propZh))].slice(0, 3).join('、');
-    return '调整 ' + compName(owner) + (names ? ' 的' + names : ' 的样式');
+    const names = [...new Set(props.map(propZh))].slice(0, 3).join(window.ClayI18n.getLocale() === 'en-US' ? ', ' : '、');
+    const detail = names ? t('history.detailPrefix', { names }) : t('history.styleSuffix');
+    return t('history.adjust', { element: compName(owner), detail });
   }
   /* 撤销栈里的动作是普通对象 {index, type, before, after, object, options}
    * (实测形态,不是 Backbone 模型)。一次样式修改会顺带产生选择器模型的
@@ -2387,11 +2438,11 @@
       if (a.object.getName) {                       // 组件自身的变化
         const keys = Object.keys(Object.assign({}, b, f));
         if (keys.indexOf('style') > -1) return styleLabel(a.object, b.style, f.style);
-        if (keys.indexOf('content') > -1) return '修改 ' + compName(a.object) + ' 的文字';
+        if (keys.indexOf('content') > -1) return t('history.changeText', { element: compName(a.object) });
         if (keys.indexOf('attributes') > -1) {
           const attrs = Object.assign({}, b.attributes || {}, f.attributes || {});
-          if ('src' in attrs) return '更换 ' + compName(a.object) + ' 的图片';
-          return '修改 ' + compName(a.object);
+          if ('src' in attrs) return t('history.replaceImage', { element: compName(a.object) });
+          return t('history.change', { element: compName(a.object) });
         }
       }
     }
@@ -2403,18 +2454,18 @@
       if (a.type === 'remove' && isComp(a.before)) removed = a.before;
       if (a.type === 'reset') hadReset = true;
     });
-    if (added && removed) return '移动 ' + compName(added);
+    if (added && removed) return t('history.move', { element: compName(added) });
     // 双击改字 = 原文字整段 reset 后放回一个新文本节点
     if (added && (hadReset || added.get('type') === 'textnode')) {
       const parent = added.parent && added.parent();
-      return '修改 ' + compName(parent || added) + ' 的文字';
+      return t('history.changeText', { element: compName(parent || added) });
     }
-    if (added) return '加入 ' + compName(added);
-    if (removed) return '删除 ' + compName(removed);
+    if (added) return t('history.add', { element: compName(added) });
+    if (removed) return t('history.delete', { element: compName(removed) });
     // 富文本输入产生的是 reset(组件集合重置)但没冒出可命名的组件 —— 也算改文字
-    if (hadReset) return '修改文字';
+    if (hadReset) return t('history.editText');
     // 过滤已由 groupIsRealEdit 结构化判定完成,能走到这里的都是真编辑,给个兜底标签
-    return '编辑内容';
+    return t('history.editContent');
   }
 
   let histTimer = null;
@@ -2445,11 +2496,11 @@
         if (hint) hint.hidden = true;
         const note = document.createElement('div');
         note.className = 'pane-hint';
-        note.innerHTML = '<p>这一页有<b>未保存的修改</b>,是在上次使用时做的。</p>'
+        note.innerHTML = '<p>' + t('history.oldDirtyHtml') + '</p>'
           + '<ul class="hint-list">'
-          + '<li>这些旧修改无法在这里逐步回退</li>'
-          + '<li>从现在起的新修改会记录在下面</li>'
-          + '<li>按 ⌘S 存回文件后,圆点会消失</li>'
+          + '<li>' + t('history.oldNoUndo') + '</li>'
+          + '<li>' + t('history.newRecorded') + '</li>'
+          + '<li>' + t('history.saveClears') + '</li>'
           + '</ul>';
         mount.appendChild(note);
       } else if (hint) {
@@ -2482,7 +2533,7 @@
       list.appendChild(b);
     };
 
-    row('打开页面时的样子', -1, true);
+    row(t('history.base'), -1, true);
     items.forEach((it) => row(it.label, it.at, false));
     mount.appendChild(list);
 
@@ -2537,7 +2588,7 @@
     set('.drop-ic', 'upload', 34);
     set('#btn-open-file .btn-ic', 'folder', 14);
     set('#btn-select-parent', 'parent', 12);
-    $('#btn-select-parent').insertAdjacentText('beforeend', '上一层');
+    $('#btn-select-parent').insertAdjacentText('beforeend', t('sidebar.parent'));
     const TAB_IC = { style: 'sliders', layers: 'layers', history: 'history' };
     $$('#sidebar-tabs .tab').forEach((t) => {
       t.querySelector('.tab-ic').innerHTML = I(TAB_IC[t.dataset.tab] || 'sliders', 13);
@@ -2557,7 +2608,7 @@
     $$('[data-sample]').forEach((b) => {
       b.onclick = () => {
         const key = b.dataset.sample;
-        const name = key === 'tailwind' ? '深色落地页' : '品牌官网';
+        const name = t(key === 'tailwind' ? 'home.sampleDark' : 'home.sampleBrand');
         runImport(window.CLAY_SAMPLES[key], name, '', key);
       };
     });
@@ -2577,7 +2628,7 @@
       if (previewing) editor.runCommand('core:preview');
       else editor.stopCommand('core:preview');
       $('#btn-preview').classList.toggle('on', previewing);
-      $('#btn-preview').title = previewing ? '退出预览' : '预览';
+      $('#btn-preview').title = t(previewing ? 'preview.exit' : 'preview.enter');
     };
 
     $('#btn-select-parent').onclick = () => {
@@ -2591,7 +2642,7 @@
       const style = sel.getStyle();
       const similar = findSimilar(sel);
       similar.forEach((c) => c.addStyle(style));
-      toast(`已把修改应用到 ${similar.length} 个同款元素`);
+      toast(t('status.appliedSimilar', { count: similar.length }));
     };
 
     $('#btn-save').onclick = saveToSource;
@@ -2645,6 +2696,14 @@
 
   // 调试句柄(自动化验证用,和 __clayEditor 一个性质):不参与任何用户路径
   window.__clay = { runImport, getDocs: () => docs, getRecents: () => recents, getActiveDocId: () => activeDocId, saveToSource, saveAsCopy, exportPdf, copyCode, closeDoc, jumpHistory, renderHistory, renderHome, openRecent };
+
+  // 样式面板和 GrapesJS 内部标签只在初始化时生成。切换语言前先落盘当前画布，
+  // 再轻量重载渲染层，让所有静态与动态文案一次性使用同一语言。
+  window.addEventListener('clay:locale-change', async (event) => {
+    if (restored) await persist();
+    if (window.clay && window.clay.reloadForLocale) window.clay.reloadForLocale(event.detail.locale);
+    else location.reload();
+  });
 
   wireUI();
   if (window.clay && window.clay.onSourceChanged) window.clay.onSourceChanged(queueSourceChange);

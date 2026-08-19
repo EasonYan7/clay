@@ -6,6 +6,7 @@
  *  4. Tailwind 检测 → 决定画布运行时与导出策略
  */
 (function () {
+  const t = (key, vars) => window.ClayI18n.t(key, vars);
   /* Tailwind 检测:必须逐个 class 令牌做完整匹配。
    * 早期版本用 /\bgrid\b/ 之类的子串匹配,会把 class="feature-grid" 这种普通语义类名
    * 误判成 Tailwind(连字符也是词边界),导致普通 CSS 页面被塞进 Tailwind 运行时。 */
@@ -209,7 +210,7 @@
       html: s.outerHTML,
       location: doc.body.contains(s) ? 'body' : 'head',
     }));
-    if (scripts.length) report.kept = `${scripts.length} 段交互脚本已暂存,导出时自动还原(编辑时不运行)`;
+    if (scripts.length) report.kept = t('import.scriptsKept', { count: scripts.length });
     scriptEls.forEach((n) => {
       if (doc.body.contains(n)) {
         const i = bodyScripts.length;
@@ -223,7 +224,7 @@
     });
     const links = doc.querySelectorAll('link[rel="stylesheet"]');
     if (links.length) {
-      const note = `${links.length} 个外部样式表已保留`;
+      const note = t('import.stylesKept', { count: links.length });
       report.kept = report.kept ? report.kept + `;${note}` : note;
     }
     links.forEach((n) => n.remove());
@@ -285,27 +286,27 @@
     const tag = (comp.get('tagName') || '').toLowerCase();
     const type = comp.get('type');
     switch (tag) {
-      case 'header': return '页头';
-      case 'nav': return '导航';
-      case 'footer': return '页脚';
-      case 'main': return '正文';
-      case 'aside': return '侧栏';
-      case 'ul': case 'ol': return '列表';
-      case 'li': return '列表项';
-      case 'img': return '图片';
-      case 'svg': return '图标';
-      case 'button': return withText('按钮', comp);
-      case 'a': return withText(looksLikeButton(comp) ? '按钮' : '链接', comp);
+      case 'header': return t('element.header');
+      case 'nav': return t('element.nav');
+      case 'footer': return t('element.footer');
+      case 'main': return t('element.main');
+      case 'aside': return t('element.aside');
+      case 'ul': case 'ol': return t('element.list');
+      case 'li': return t('element.listItem');
+      case 'img': return t('element.image');
+      case 'svg': return t('element.icon');
+      case 'button': return withText(t('element.button'), comp);
+      case 'a': return withText(t(looksLikeButton(comp) ? 'element.button' : 'element.link'), comp);
       case 'h1': case 'h2': case 'h3': case 'h4': case 'h5': case 'h6':
-        return withText('标题', comp);
-      case 'p': return withText('文本', comp);
-      case 'span': return withText('文字', comp);
-      case 'section': return withHeading('区块', comp);
-      case 'form': return '表单';
-      case 'input': case 'textarea': case 'select': return '输入框';
-      case 'table': return '表格';
-      case 'td': case 'th': return withText('单元格', comp);
-      case 'video': return '视频';
+        return withText(t('element.heading'), comp);
+      case 'p': return withText(t('element.text'), comp);
+      case 'span': return withText(t('element.text'), comp);
+      case 'section': return withHeading(t('element.section'), comp);
+      case 'form': return t('element.form');
+      case 'input': case 'textarea': case 'select': return t('element.input');
+      case 'table': return t('element.table');
+      case 'td': case 'th': return withText(t('element.cell'), comp);
+      case 'video': return t('element.video');
       default:
         if (type === 'textnode') return null;
         return null; // div 等交给结构推断
@@ -314,14 +315,14 @@
 
   function withText(prefix, comp) {
     const t = textOf(comp, 8);
-    return t ? `${prefix}「${t}」` : prefix;
+    return t ? (window.ClayI18n.getLocale() === 'en-US' ? `${prefix} “${t}”` : `${prefix}「${t}」`) : prefix;
   }
 
   function withHeading(prefix, comp) {
     const el = comp.getEl && comp.getEl();
     const h = el && el.querySelector('h1,h2,h3,h4');
     const t = h ? h.textContent.trim().replace(/\s+/g, ' ').slice(0, 10) : '';
-    return t ? `${prefix}「${t}」` : prefix;
+    return t ? (window.ClayI18n.getLocale() === 'en-US' ? `${prefix} “${t}”` : `${prefix}「${t}」`) : prefix;
   }
 
   function looksLikeButton(comp) {
@@ -351,14 +352,14 @@
       kids.forEach((k, i) => {
         const h = k.getEl && k.getEl() && k.getEl().querySelector('h1,h2,h3,h4');
         const t = h ? h.textContent.trim().slice(0, 8) : '';
-        k.set('custom-name', t ? `卡片「${t}」` : `卡片 ${i + 1}`);
+        k.set('custom-name', t ? window.ClayI18n.t('element.cardNamed', { name: t }) : window.ClayI18n.t('element.card', { count: i + 1 }));
       });
     });
     // 兜底:还叫默认名的容器
     walk(root, (comp) => {
       if (comp.get('custom-name')) return;
       const tag = (comp.get('tagName') || '').toLowerCase();
-      if (tag === 'div') comp.set('custom-name', '容器');
+      if (tag === 'div') comp.set('custom-name', t('element.container'));
     });
   }
 
@@ -410,7 +411,7 @@
     if (wrapper.addAttributes) wrapper.addAttributes(bodyAttrs);
     if (parsed.bodyClass) parsed.bodyClass.split(/\s+/).filter(Boolean).forEach((c) => wrapper.addClass(c));
     if (parsed.bodyStyleMap) wrapper.addStyle(parsed.bodyStyleMap);
-    wrapper.set('custom-name', '页面');
+    wrapper.set('custom-name', t('element.page'));
     nameTree(wrapper);
     // 保存“刚导入、尚未编辑”时的规则快照。导出时用当前规则减去这份基线,
     // 才能识别带作者自定义 id 的元素修改;仅靠 #iXXX 会漏掉这类改动。

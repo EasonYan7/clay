@@ -61,10 +61,21 @@ body {
   background: var(--surface); border-bottom: 1px solid var(--border);
   -webkit-app-region: drag;
 }
-#topbar button, .segmented { -webkit-app-region: no-drag; }
+#topbar button, .segmented, .locale-switch { -webkit-app-region: no-drag; }
 .tb-group { display: flex; align-items: center; gap: 2px; }
 .tb-spacer { flex: 1; }
 .tb-divider { width: 1px; height: 18px; background: var(--border); margin: 0 6px; }
+
+.locale-switch {
+  display: flex; align-items: center; gap: 1px; padding: 2px;
+  border: 1px solid var(--border); border-radius: 7px; background: var(--surface-2);
+}
+.locale-switch button {
+  height: 22px; min-width: 25px; padding: 0 6px; border: 0; border-radius: 5px;
+  background: transparent; color: var(--text-3); font: 600 10px/1 var(--mono); cursor: pointer;
+}
+.locale-switch button:hover { color: var(--text); }
+.locale-switch button.active { background: var(--surface); color: var(--accent-2); }
 
 .brand {
   display: flex; align-items: center; gap: 7px;

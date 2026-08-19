@@ -11,6 +11,36 @@ if (process.env.CLAY_USERDATA) app.setPath('userData', process.env.CLAY_USERDATA
 let win = null;
 let closeApproved = false;
 let closeRequestPending = false;
+let currentLocale = 'zh-CN';
+
+const MAIN_MESSAGES = {
+  'zh-CN': {
+    about: '关于 Clay', hide: '隐藏 Clay', quit: '退出 Clay', file: '文件', open: '打开 HTML 文件…',
+    paste: '粘贴代码导入…', save: '保存', saveAs: '另存为…', exportPdf: '导出 PDF…',
+    copyCode: '复制整页代码（给开发）', edit: '编辑', undo: '撤销', redo: '重做', cut: '剪切',
+    copy: '复制', pasteEdit: '粘贴', selectAll: '全选', view: '视图', reload: '重新加载',
+    fullscreen: '全屏', devtools: '开发者工具', window: '窗口', minimize: '最小化', close: '关闭窗口',
+    htmlPage: 'HTML 页面', cancel: '取消', overwrite: '覆盖原文件', overwriteMessage: '这会覆盖你导入的原文件',
+    overwriteDetail: '原文件会被 Clay 导出的版本替换，无法撤销。', pdfFile: 'PDF 文件', invalidPath: '文件路径无效', invalidData: '数据格式错误',
+  },
+  'en-US': {
+    about: 'About Clay', hide: 'Hide Clay', quit: 'Quit Clay', file: 'File', open: 'Open HTML File…',
+    paste: 'Import Pasted Code…', save: 'Save', saveAs: 'Save As…', exportPdf: 'Export PDF…',
+    copyCode: 'Copy Full Page Code', edit: 'Edit', undo: 'Undo', redo: 'Redo', cut: 'Cut', copy: 'Copy',
+    pasteEdit: 'Paste', selectAll: 'Select All', view: 'View', reload: 'Reload', fullscreen: 'Toggle Full Screen',
+    devtools: 'Developer Tools', window: 'Window', minimize: 'Minimize', close: 'Close Window',
+    htmlPage: 'HTML Page', cancel: 'Cancel', overwrite: 'Overwrite Original', overwriteMessage: 'This will overwrite the imported source file',
+    overwriteDetail: 'Clay will replace the original file with the exported version. This cannot be undone.',
+    pdfFile: 'PDF File', invalidPath: 'Invalid file path', invalidData: 'Invalid data format',
+  },
+};
+
+function normalizeLocale(locale) {
+  return String(locale || '').toLowerCase().startsWith('en') ? 'en-US' : 'zh-CN';
+}
+function mt(key) {
+  return MAIN_MESSAGES[currentLocale][key] || MAIN_MESSAGES['zh-CN'][key] || key;
+}
 
 /* 当前编辑文件的外部变更监听。
  *
@@ -124,70 +154,70 @@ function buildMenu() {
     {
       label: 'Clay',
       submenu: [
-        { role: 'about', label: '关于 Clay' },
+        { role: 'about', label: mt('about') },
         { type: 'separator' },
-        { role: 'hide', label: '隐藏 Clay' },
-        { role: 'quit', label: '退出 Clay' },
+        { role: 'hide', label: mt('hide') },
+        { role: 'quit', label: mt('quit') },
       ],
     },
     {
-      label: '文件',
+      label: mt('file'),
       submenu: [
         {
-          label: '打开 HTML 文件…',
+          label: mt('open'),
           accelerator: 'CmdOrCtrl+O',
           click: () => win && win.webContents.send('clay-menu', 'open'),
         },
         {
-          label: '粘贴代码导入…',
+          label: mt('paste'),
           accelerator: 'Shift+CmdOrCtrl+V',
           click: () => win && win.webContents.send('clay-menu', 'paste'),
         },
         { type: 'separator' },
         {
-          label: '保存',
+          label: mt('save'),
           accelerator: 'CmdOrCtrl+S',
           click: () => win && win.webContents.send('clay-menu', 'save'),
         },
         {
-          label: '另存为…',
+          label: mt('saveAs'),
           accelerator: 'Shift+CmdOrCtrl+S',
           click: () => win && win.webContents.send('clay-menu', 'save-as'),
         },
         {
-          label: '导出 PDF…',
+          label: mt('exportPdf'),
           accelerator: 'CmdOrCtrl+P',
           click: () => win && win.webContents.send('clay-menu', 'export-pdf'),
         },
         { type: 'separator' },
         {
-          label: '复制整页代码(给开发)',
+          label: mt('copyCode'),
           accelerator: 'CmdOrCtrl+E',
           click: () => win && win.webContents.send('clay-menu', 'copy-code'),
         },
       ],
     },
     {
-      label: '编辑',
+      label: mt('edit'),
       submenu: [
-        { role: 'undo', label: '撤销' },
-        { role: 'redo', label: '重做' },
+        { role: 'undo', label: mt('undo') },
+        { role: 'redo', label: mt('redo') },
         { type: 'separator' },
-        { role: 'cut', label: '剪切' },
-        { role: 'copy', label: '复制' },
-        { role: 'paste', label: '粘贴' },
-        { role: 'selectAll', label: '全选' },
+        { role: 'cut', label: mt('cut') },
+        { role: 'copy', label: mt('copy') },
+        { role: 'paste', label: mt('pasteEdit') },
+        { role: 'selectAll', label: mt('selectAll') },
       ],
     },
     {
-      label: '视图',
+      label: mt('view'),
       submenu: [
-        { role: 'reload', label: '重新加载' },
-        { role: 'togglefullscreen', label: '全屏' },
-        { role: 'toggleDevTools', label: '开发者工具' },
+        { role: 'reload', label: mt('reload') },
+        { role: 'togglefullscreen', label: mt('fullscreen') },
+        { role: 'toggleDevTools', label: mt('devtools') },
       ],
     },
-    { label: '窗口', submenu: [{ role: 'minimize', label: '最小化' }, { role: 'close', label: '关闭窗口' }] },
+    { label: mt('window'), submenu: [{ role: 'minimize', label: mt('minimize') }, { role: 'close', label: mt('close') }] },
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
@@ -198,20 +228,20 @@ function buildMenu() {
 ipcMain.handle('clay:save-file', async (_e, defaultName, content, sourcePath) => {
   const startDir = sourcePath ? path.dirname(sourcePath) : app.getPath('documents');
   const { canceled, filePath } = await dialog.showSaveDialog(win, {
-    title: '另存为',
+    title: mt('saveAs').replace(/…$/, ''),
     defaultPath: path.join(startDir, defaultName),
-    filters: [{ name: 'HTML 页面', extensions: ['html'] }],
+    filters: [{ name: mt('htmlPage'), extensions: ['html'] }],
   });
   if (canceled || !filePath) return null;
 
   if (sourcePath && path.resolve(filePath) === path.resolve(sourcePath)) {
     const { response } = await dialog.showMessageBox(win, {
       type: 'warning',
-      buttons: ['取消', '覆盖原文件'],
+      buttons: [mt('cancel'), mt('overwrite')],
       defaultId: 0,
       cancelId: 0,
-      message: '这会覆盖你导入的原文件',
-      detail: path.basename(sourcePath) + '\n\n原文件会被 Clay 导出的版本替换,无法撤销。',
+      message: mt('overwriteMessage'),
+      detail: path.basename(sourcePath) + '\n\n' + mt('overwriteDetail'),
     });
     if (response !== 1) return null;
   }
@@ -273,9 +303,9 @@ ipcMain.handle('clay:export-pdf', async (_e, defaultName, html, width, height, s
     filePath = process.env.CLAY_PDF_OUT;
   } else {
     const res = await dialog.showSaveDialog(win, {
-      title: '导出 PDF',
+      title: mt('exportPdf').replace(/…$/, ''),
       defaultPath: path.join(app.getPath('documents'), defaultName),
-      filters: [{ name: 'PDF 文件', extensions: ['pdf'] }],
+      filters: [{ name: mt('pdfFile'), extensions: ['pdf'] }],
     });
     if (res.canceled || !res.filePath) return null;
     filePath = res.filePath;
@@ -421,7 +451,7 @@ ipcMain.handle('clay:read-path', async (_e, filePath) => {
  * 也能在用户重新点开标签页时立即被发现,而不是必须等下一次磁盘事件。 */
 ipcMain.handle('clay:watch-source', async (e, filePath) => {
   stopSourceWatch();
-  if (!filePath || typeof filePath !== 'string') return { ok: false, error: '文件路径无效' };
+  if (!filePath || typeof filePath !== 'string') return { ok: false, error: mt('invalidPath') };
 
   const target = path.resolve(filePath);
   const dir = path.dirname(target);
@@ -464,8 +494,8 @@ ipcMain.handle('clay:unwatch-source', async (e) => {
 
 ipcMain.handle('clay:open-file', async () => {
   const { canceled, filePaths } = await dialog.showOpenDialog(win, {
-    title: '打开 HTML 文件',
-    filters: [{ name: 'HTML 页面', extensions: ['html', 'htm'] }],
+    title: mt('open').replace(/…$/, ''),
+    filters: [{ name: mt('htmlPage'), extensions: ['html', 'htm'] }],
     properties: ['openFile'],
   });
   if (canceled || !filePaths.length) return null;
@@ -492,7 +522,7 @@ function guardedWrite(json) {
   const bak = p + '.bak';
 
   let incomingEmpty = true;
-  try { incomingEmpty = !(JSON.parse(json).docs || []).length; } catch (e) { return { ok: false, error: '数据格式错误' }; }
+  try { incomingEmpty = !(JSON.parse(json).docs || []).length; } catch (e) { return { ok: false, error: mt('invalidData') }; }
 
   if (incomingEmpty && fs.existsSync(p)) {
     try {
@@ -540,7 +570,21 @@ ipcMain.handle('clay:load-workspace', async () => {
   }
 });
 
+ipcMain.on('clay:set-locale', (_event, locale) => {
+  const next = normalizeLocale(locale);
+  if (next === currentLocale) return;
+  currentLocale = next;
+  buildMenu();
+});
+
+ipcMain.on('clay:reload-for-locale', (event, locale) => {
+  currentLocale = normalizeLocale(locale);
+  buildMenu();
+  if (!event.sender.isDestroyed()) setImmediate(() => event.sender.reload());
+});
+
 app.whenReady().then(() => {
+  currentLocale = normalizeLocale(app.getLocale());
   buildMenu();
   createWindow();
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
