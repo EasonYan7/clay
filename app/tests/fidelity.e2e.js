@@ -127,7 +127,9 @@ app.whenReady().then(async () => {
     assert.ok(out.indexOf('data-body=""') > out.indexOf('<div id="probe"'));
     assert.ok(out.indexOf('data-body=""') < out.indexOf('<pre id="spacing"'));
     assert.ok(out.includes('  alpha\n    beta'));
-    assert.match(out, /\/\* Clay 中调整的部分 \*\/[\s\S]*#probe\{color:rgb\(9, 8, 7\);\}/);
+    // The export marker is localized by the app locale; the CSS payload is
+    // the invariant under test, not the human-language label around it.
+    assert.match(out, /\/\* (?:Clay 中调整的部分|Adjustments made in Clay) \*\/[\s\S]*#probe\{color:rgb\(9, 8, 7\);\}/);
 
     process.stdout.write('fidelity.e2e: ok\n');
   } catch (err) {

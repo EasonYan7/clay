@@ -70,6 +70,13 @@ jobs:
       - name: Install dependencies
         run: npm ci --prefix app
       # Xvfb covers the Linux display requirement; it is a behavioral check,
-      # not a substitute for macOS window-manager or Metal validation.
-      - name: Run Electron GUI suites under Xvfb
-        run: xvfb-run --auto-servernum --server-args="-screen 0 1440x900x24" npm run test:gui --prefix app
+      # not a substitute for macOS window-manager, Metal, or PDF-printing
+      # validation. The main-process/PDF and production lifecycle suites stay
+      # on macOS because Clay is currently a macOS product.
+      - name: Run cross-platform Electron suites under Xvfb
+        run: >-
+          xvfb-run --auto-servernum --server-args="-screen 0 1440x900x24"
+          sh -c 'npm run test:editor --prefix app &&
+          npm run test:fidelity --prefix app &&
+          npm run test:i18n --prefix app &&
+          npm run test:renderer-state --prefix app'
