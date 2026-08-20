@@ -48,7 +48,386 @@
     return false;
   }
 
+  /* HTML 属性不是都只是“数据”:事件属性和 javascript/vbscript URL 会在
+   * 导出页面再次打开时主动执行。只过滤真正具备执行语义的属性，保留
+   * data-*、aria-*、lang、dir 等合法元数据，以及 data:image 等常用资源。
+   * 这里在 DOM 解析后统一处理，因而 html/body 属性、组件属性和 head 节点
+   * 走同一套规则，避免只清一处导致导出时又把危险属性带回来。 */
+  const URI_ATTRS = new Set([
+    'action', 'background', 'cite', 'data', 'formaction', 'href', 'lowsrc', 'poster',
+    'src', 'srcset', 'xlink:href',
+  ]);
+  const AUTHOR_KEY_ATTR = 'data-clay-author-key';
+
+  function activeAttrName(name) {
+    const lower = String(name || '').toLowerCase();
+    return /^on[a-z0-9:_-]*$/i.test(lower) || URI_ATTRS.has(lower) || lower === 'srcdoc';
+  }
+
+  function hashKey(value) {
+    let hash = 2166136261;
+    String(value || '').split('').forEach((ch) => {
+      hash ^= ch.charCodeAt(0);
+      hash = Math.imul(hash, 16777619);
+    });
+    return 'a' + (hash >>> 0).toString(36);
+  }
+
+  function elementPath(el) {
+    const path = [];
+    let node = el;
+    while (node && node.parentElement) {
+      let index = 0;
+      let sibling = node;
+      while ((sibling = sibling.previousElementSibling)) index++;
+      path.unshift(index);
+      node = node.parentElement;
+    }
+    return path.join('.');
+  }
+
+  function activeAttrsOf(el) {
+    const out = {};
+    if (!el || !el.attributes) return out;
+    const tag = String(el.tagName || '').toLowerCase();
+    [...el.attributes].forEach((attr) => {
+      const lower = String(attr.name || '').toLowerCase();
+      const nested = (tag === 'iframe' || tag === 'frame') && ['src', 'srcdoc'].includes(lower)
+        || tag === 'object' && lower === 'data'
+        || tag === 'embed' && ['src', 'data'].includes(lower);
+      if ((activeAttrName(attr.name) && unsafeAttr(attr.name, attr.value, tag)) || nested) {
+        out[attr.name] = attr.value;
+      }
+    });
+    return out;
+  }
+
+  function annotateAuthorAttrs(rawRoot, safeRoot) {
+    const map = {};
+    if (!rawRoot || !safeRoot) return map;
+    const rawEls = [rawRoot].concat(rawRoot.querySelectorAll ? [...rawRoot.querySelectorAll('*')] : []);
+    const safeEls = [safeRoot].concat(safeRoot.querySelectorAll ? [...safeRoot.querySelectorAll('*')] : []);
+    rawEls.forEach((rawEl, index) => {
+      const safeEl = safeEls[index];
+      if (!safeEl || String(rawEl.tagName || '').toLowerCase() !== String(safeEl.tagName || '').toLowerCase()) return;
+      const attrs = activeAttrsOf(rawEl);
+      if (!Object.keys(attrs).length) return;
+      // The key travels with the component through GrapesJS. It is deliberately
+      // not a DOM index: inserting/reordering a preceding component must not
+      // make an unrelated onclick/srcdoc reappear on the wrong element.
+      const key = hashKey(String(rawEl.tagName || '').toLowerCase() + '|' + elementPath(rawEl)
+        + '|' + (rawEl.getAttribute('id') || '') + '|' + Object.keys(attrs).sort().join(','));
+      safeEl.setAttribute(AUTHOR_KEY_ATTR, key);
+      map[key] = attrs;
+    });
+    return map;
+  }
+
+  function compactUri(value) {
+    // HTML parser 已经解码实体；再去掉控制字符/空白，覆盖 java\nscript: 等
+    // 浏览器会接受的写法。decodeURIComponent 只在不抛错时使用，坏编码仍按
+    // 原值检查，不能因为解码失败反而放行。
+    let out = String(value || '').replace(/[\u0000-\u0020\u007f]/g, '');
+    try { out = decodeURIComponent(out); } catch (e) { /* 保留原串检查 */ }
+    return out.toLowerCase();
+  }
+
+  function unsafeUri(value, tagName, attrName) {
+    const uri = compactUri(value);
+    if (/^(?:javascript|vbscript):/.test(uri)) return true;
+    if (/^data:(?:text\/html|application\/(?:javascript|ecmascript))/.test(uri)) return true;
+    // Inline SVG is a legitimate image source. It becomes an active nested
+    // document only in navigation/object/embed contexts, so do not destroy
+    // ordinary <img src="data:image/svg+xml,..."> author assets.
+    if (/^data:image\/svg\+xml/.test(uri)) {
+      const tag = String(tagName || '').toLowerCase();
+      const attr = String(attrName || '').toLowerCase();
+      return ['iframe', 'frame', 'object', 'embed'].includes(tag)
+        || ['href', 'xlink:href', 'action', 'formaction'].includes(attr);
+    }
+    return false;
+  }
+
+  function unsafeAttr(name, value, tagName) {
+    const lower = String(name || '').toLowerCase();
+    // on* 事件属性（onclick/onload/onanimation…）全部移除；data-on* 不匹配，
+    // 仍可作为业务元数据保留。
+    if (/^on[a-z0-9:_-]*$/i.test(lower)) return true;
+    // iframe srcdoc 是一整份可执行的嵌套 HTML；不能只检查它的字符串里
+    // 是否出现 javascript:,否则同源 srcdoc 中的普通 <script> 仍会执行。
+    if (lower === 'srcdoc') return true;
+    if (URI_ATTRS.has(lower)) {
+      if (lower === 'srcset') {
+        return String(value || '').split(',').some((candidate) => unsafeUri(candidate.trim().split(/\s+/)[0], tagName, lower));
+      }
+      return unsafeUri(value, tagName, lower);
+    }
+    return false;
+  }
+
+  function sanitizeActiveAttrs(root, report) {
+    if (!root) return;
+    const nodes = [root].concat(root.querySelectorAll ? [...root.querySelectorAll('*')] : []);
+    nodes.forEach((el) => {
+      if (!el.attributes) return;
+      const tag = String(el.tagName || '').toLowerCase();
+      [...el.attributes].forEach((a) => {
+        if (!unsafeAttr(a.name, a.value, tag)) return;
+        if (report && report.dropped.indexOf(a.name) < 0) report.dropped.push(a.name);
+        el.removeAttribute(a.name);
+      });
+      // iframe/srcdoc、iframe[src]、object[data]、embed[src] 可以加载同源
+      // HTML/SVG 等嵌套文档；它们即使不是 javascript: URL，也可能在未沙箱化的
+      // 画布里再次执行脚本。保留 width/height/title/aria/data-* 等展示与元数据，
+      // 只去掉会打开嵌套文档的入口；普通 img/video/audio 的资源不受影响。
+      const nestedAttrs = tag === 'iframe' || tag === 'frame'
+        ? ['src', 'srcdoc']
+        : tag === 'object'
+          ? ['data']
+          : tag === 'embed'
+            ? ['src', 'data']
+            : [];
+      nestedAttrs.forEach((name) => {
+        if (!el.hasAttribute(name)) return;
+        if (report && report.dropped.indexOf(tag + '[' + name + ']') < 0) report.dropped.push(tag + '[' + name + ']');
+        el.removeAttribute(name);
+      });
+      // meta refresh 是导航行为而非展示元数据；即使 content 不是显式
+      // javascript:,它也可能把用户带到一个主动页面。导出时不保留这一类节点。
+      if (tag === 'meta' && (el.getAttribute('http-equiv') || '').toLowerCase() === 'refresh') {
+        if (report && report.dropped.indexOf('meta[http-equiv=refresh]') < 0) report.dropped.push('meta[http-equiv=refresh]');
+        el.remove();
+      }
+    });
+  }
+
+  function isPlainRecord(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+    const proto = Object.getPrototypeOf(value);
+    return proto === Object.prototype || proto === null;
+  }
+
+  function sanitizeAttrMap(attrs, tagName) {
+    const out = {};
+    if (!isPlainRecord(attrs)) return out;
+    const tag = String(tagName || '').toLowerCase();
+    Object.keys(attrs).forEach((name) => {
+      if (['__proto__', 'prototype', 'constructor'].includes(String(name).toLowerCase())) return;
+      if (!/^[A-Za-z_:][A-Za-z0-9:._-]*$/.test(String(name))) return;
+      const value = attrs[name];
+      if (value === undefined || value === null) return;
+      if (String(name).toLowerCase() === AUTHOR_KEY_ATTR) return;
+      if (unsafeAttr(name, value, tag)) return;
+      if ((tag === 'iframe' || tag === 'frame') && ['src', 'srcdoc'].includes(String(name).toLowerCase())) return;
+      if (tag === 'object' && String(name).toLowerCase() === 'data') return;
+      if (tag === 'embed' && ['src', 'data'].includes(String(name).toLowerCase())) return;
+      out[name] = value;
+    });
+    return out;
+  }
+
+  function copyRecord(value) {
+    const out = Object.create(null);
+    if (!isPlainRecord(value)) return out;
+    Object.keys(value).forEach((name) => {
+      if (['__proto__', 'prototype', 'constructor'].includes(String(name).toLowerCase())) return;
+      out[name] = value[name];
+    });
+    return out;
+  }
+
+  function singleElementFromHtml(html) {
+    if (typeof html !== 'string' || !html.trim()) return null;
+    const holder = document.createElement('template');
+    holder.innerHTML = html.trim();
+    const elements = [...holder.content.children];
+    if (elements.length !== 1) return null;
+    return { holder, element: elements[0] };
+  }
+
+  /* Head metadata is persisted as HTML for fidelity. Never trust the saved tag
+   * field: parse the actual HTML and use that tag for all canvas decisions. */
+  function normalizeHeadNodes(nodes, safe, report) {
+    if (!Array.isArray(nodes)) return [];
+    const out = [];
+    nodes.forEach((node) => {
+      const parsed = singleElementFromHtml(node && node.html);
+      if (!parsed) return;
+      const el = parsed.element;
+      if (safe) sanitizeActiveAttrs(el, report || { dropped: [] });
+      if (!el.parentNode && !parsed.holder.content.contains(el)) return;
+      const actualTag = String(el.tagName || '').toLowerCase();
+      if (!actualTag) return;
+      if (safe && (actualTag === 'script' || actualTag === 'noscript')) return;
+      out.push({ tag: actualTag, html: el.outerHTML });
+    });
+    return out;
+  }
+
+  function sanitizeCanvasMarkup(html, report) {
+    if (typeof html !== 'string' || !html) return typeof html === 'string' ? html : '';
+    const holder = document.createElement('template');
+    holder.innerHTML = html;
+    sanitizeActiveAttrs(holder.content, report || { dropped: [] });
+    holder.content.querySelectorAll('script, noscript').forEach((node) => node.remove());
+    return holder.innerHTML;
+  }
+
+  function restoreAuthorActiveAttrs(currentHtml, authorActiveAttrs) {
+    if (typeof currentHtml !== 'string') return currentHtml;
+    const current = document.createElement('template');
+    current.innerHTML = currentHtml;
+    const map = isPlainRecord(authorActiveAttrs) ? authorActiveAttrs : {};
+    [...current.content.querySelectorAll('[' + AUTHOR_KEY_ATTR + ']')].forEach((el) => {
+      const key = el.getAttribute(AUTHOR_KEY_ATTR);
+      const attrs = isPlainRecord(map[key]) ? map[key] : null;
+      if (attrs) Object.keys(attrs).forEach((name) => {
+        if (String(name).toLowerCase() === AUTHOR_KEY_ATTR || ['__proto__', 'prototype', 'constructor'].includes(String(name).toLowerCase())
+          || !/^[A-Za-z_:][A-Za-z0-9:._-]*$/.test(String(name)) || el.hasAttribute(name)) return;
+        try { el.setAttribute(name, attrs[name]); } catch (e) { /* malformed legacy attr: ignore */ }
+      });
+      el.removeAttribute(AUTHOR_KEY_ATTR);
+    });
+    // A user may duplicate a component carrying a key. Restore both copies
+    // conservatively; the author action is explicit and no unrelated element
+    // can acquire it merely because its DOM index shifted.
+    return current.innerHTML;
+  }
+
+  function sanitizeProjectData(value, key, parentType) {
+    if (Array.isArray(value)) {
+      return value.map((item) => sanitizeProjectData(item, key, parentType)).filter((item) => item !== null);
+    }
+    if (!isPlainRecord(value)) {
+      const markupField = key === 'components' || key === 'html' || key === 'bodyHtml'
+        || (key === 'content' && parentType !== 'textnode');
+      if (typeof value === 'string' && markupField) {
+        return sanitizeCanvasMarkup(value);
+      }
+      return value;
+    }
+
+    const tag = String(value.tagName || value.tag || '').toLowerCase();
+    const type = String(value.type || '').toLowerCase();
+    // GrapesJS can store executable components without a literal <script> tag.
+    if (tag === 'script' || ['script', 'script-export', 'script-props'].includes(type)) return null;
+
+    const out = {};
+    Object.keys(value).forEach((name) => {
+      const lower = String(name).toLowerCase();
+      if (['__proto__', 'prototype', 'constructor'].includes(lower)) return;
+      if (lower === 'script' || lower === 'script-export' || lower === 'script-props'
+        || lower === 'scriptprops') return;
+      if ((lower === 'attributes' || lower === 'attrs') && isPlainRecord(value[name])) {
+        out[name] = sanitizeAttrMap(value[name], tag);
+        // Author markers are inert metadata used to reconnect the safe canvas
+        // component with the raw-only attrs kept beside the workspace doc.
+        // Keep a well-formed marker through migration; PDF/export sanitizers
+        // remove it at their final boundary, and an unknown key restores
+        // nothing.
+        const marker = value[name][AUTHOR_KEY_ATTR];
+        if (typeof marker === 'string' && /^[A-Za-z0-9_-]+$/.test(marker)) {
+          out[name][AUTHOR_KEY_ATTR] = marker;
+        }
+        return;
+      }
+      const next = sanitizeProjectData(value[name], lower, type);
+      if (next !== null) out[name] = next;
+    });
+
+    if (tag === 'iframe' || tag === 'frame') {
+      ['src', 'srcdoc'].forEach((name) => {
+        if (out.attributes) delete out.attributes[name];
+        if (out.attrs) delete out.attrs[name];
+      });
+    } else if (tag === 'object') {
+      if (out.attributes) delete out.attributes.data;
+      if (out.attrs) delete out.attrs.data;
+    } else if (tag === 'embed') {
+      ['src', 'data'].forEach((name) => {
+        if (out.attributes) delete out.attributes[name];
+        if (out.attrs) delete out.attrs[name];
+      });
+    }
+    return out;
+  }
+
+  function sanitizeWorkspaceDocument(doc) {
+    if (!isPlainRecord(doc)) return null;
+    let out;
+    try { out = JSON.parse(JSON.stringify(doc)); } catch (e) { out = Object.assign({}, doc); }
+    const cleanData = sanitizeProjectData(out.data || {}, 'data', '');
+    out.data = isPlainRecord(cleanData) ? cleanData : {};
+    const report = { dropped: [] };
+    const hasSafe = Array.isArray(out.safeHeadNodes) || isPlainRecord(out.safeHtmlAttrs)
+      || isPlainRecord(out.safeBodyAttrs);
+    if (hasSafe) {
+      const rawHtmlAttrs = isPlainRecord(out.rawHtmlAttrs) ? out.rawHtmlAttrs : out.htmlAttrs;
+      const rawBodyAttrs = isPlainRecord(out.rawBodyAttrs) ? out.rawBodyAttrs : out.bodyAttrs;
+      const rawHeadNodes = Array.isArray(out.rawHeadNodes) ? out.rawHeadNodes : out.headNodes;
+      out.htmlAttrs = copyRecord(isPlainRecord(out.htmlAttrs) ? out.htmlAttrs : rawHtmlAttrs);
+      out.bodyAttrs = copyRecord(isPlainRecord(out.bodyAttrs) ? out.bodyAttrs : rawBodyAttrs);
+      out.rawHtmlAttrs = copyRecord(rawHtmlAttrs);
+      out.rawBodyAttrs = copyRecord(rawBodyAttrs);
+      out.rawHeadNodes = normalizeHeadNodes(rawHeadNodes, false, report);
+      out.safeHtmlAttrs = sanitizeAttrMap(out.safeHtmlAttrs || rawHtmlAttrs, 'html');
+      out.safeBodyAttrs = sanitizeAttrMap(out.safeBodyAttrs || rawBodyAttrs, 'body');
+      out.safeHeadNodes = normalizeHeadNodes(out.safeHeadNodes || rawHeadNodes, true, report);
+    } else {
+      // A pre-v3 workspace has only one copy of these fields. Keep that copy
+      // as the normal-export source and derive a separate inert copy for the
+      // canvas/PDF path; otherwise migration would silently erase author
+      // events, nested-resource URLs, and non-executable head metadata.
+      const rawHtmlAttrs = copyRecord(out.htmlAttrs);
+      const rawBodyAttrs = copyRecord(out.bodyAttrs);
+      const rawHeadNodes = normalizeHeadNodes(out.headNodes, false, report);
+      out.rawHtmlAttrs = rawHtmlAttrs;
+      out.rawBodyAttrs = rawBodyAttrs;
+      out.rawHeadNodes = rawHeadNodes;
+      out.htmlAttrs = rawHtmlAttrs;
+      out.bodyAttrs = rawBodyAttrs;
+      out.safeHtmlAttrs = sanitizeAttrMap(rawHtmlAttrs, 'html');
+      out.safeBodyAttrs = sanitizeAttrMap(rawBodyAttrs, 'body');
+      out.safeHeadNodes = normalizeHeadNodes(rawHeadNodes, true, report);
+      out.headNodes = rawHeadNodes;
+    }
+    if (isPlainRecord(out.rawHtmlAttrs)) out.rawHtmlAttrs = copyRecord(out.rawHtmlAttrs);
+    if (isPlainRecord(out.rawBodyAttrs)) out.rawBodyAttrs = copyRecord(out.rawBodyAttrs);
+    if (typeof out.rawBodyHtml !== 'string') delete out.rawBodyHtml;
+    if (isPlainRecord(out.authorActiveAttrs)) out.authorActiveAttrs = copyRecord(out.authorActiveAttrs);
+    if (Array.isArray(out.rawHeadNodes)) out.rawHeadNodes = normalizeHeadNodes(out.rawHeadNodes, false, report);
+    if (Array.isArray(out.headNodes)) out.headNodes = normalizeHeadNodes(out.headNodes, false, report);
+    if (Array.isArray(out.safeHeadNodes)) out.safeHeadNodes = normalizeHeadNodes(out.safeHeadNodes, true, report);
+    if (!Array.isArray(out.bodyScripts) && Array.isArray(out.scripts)) {
+      out.bodyScripts = out.scripts.filter((script) => script && script.location === 'body')
+        .map((script) => script.html || (script.src
+          ? '<script src="' + String(script.src).replace(/"/g, '&quot;') + '"></script>'
+          : '<script>' + String(script.content || '') + '</script>'));
+    }
+    const rawBaseHref = typeof out.rawBaseHref === 'string' ? out.rawBaseHref
+      : (typeof out.baseHref === 'string' ? out.baseHref : '');
+    out.rawBaseHref = rawBaseHref;
+    out.baseHref = rawBaseHref;
+    out.safeBaseHref = unsafeUri(rawBaseHref, 'base', 'href') ? '' : rawBaseHref;
+    // Mark migrated head/attribute pairs as structured fidelity data so the
+    // normal exporter can use the raw side while PDF/canvas use the safe side.
+    if (Array.isArray(out.headNodes) || Array.isArray(out.safeHeadNodes)) {
+      out.fidelityVersion = Math.max(Number(out.fidelityVersion) || 0, 3);
+    }
+    return out;
+  }
+
   function attrsOf(el) {
+    const out = {};
+    if (!el) return out;
+    [...el.attributes].forEach((a) => {
+      if (String(a.name).toLowerCase() === AUTHOR_KEY_ATTR) return;
+      if (!unsafeAttr(a.name, a.value, el.tagName)) out[a.name] = a.value;
+    });
+    return out;
+  }
+
+  function rawAttrsOf(el) {
     const out = {};
     if (!el) return out;
     [...el.attributes].forEach((a) => { out[a.name] = a.value; });
@@ -165,7 +544,29 @@
 
   function parse(raw) {
     const doc = new DOMParser().parseFromString(raw, 'text/html');
+    // Keep an untouched copy for ordinary HTML export.  The second document is
+    // the only one that enters the canvas and is aggressively made inert.
+    const safeDoc = new DOMParser().parseFromString(raw, 'text/html');
     const report = { dropped: [] };
+    const authorActiveAttrs = annotateAuthorAttrs(doc.body, safeDoc.body);
+    sanitizeActiveAttrs(safeDoc.documentElement, report);
+
+    const collectHeadNodes = (source, safe) => {
+      const nodes = [...source.head.children].map((el) => {
+        const tag = String(el.tagName || '').toLowerCase();
+        const name = (el.getAttribute('name') || '').toLowerCase();
+        if (tag === 'title' || (tag === 'meta' && (el.hasAttribute('charset') || name === 'viewport'))) return null;
+        if (safe && (tag === 'script' || tag === 'noscript')) return null;
+        return { tag, html: el.outerHTML };
+      }).filter(Boolean);
+      // style/link in body is legal enough in generated pages and affects
+      // rendering, so retain it in the same ordered fidelity list.
+      [...source.body.querySelectorAll('style, link[rel~="stylesheet" i]')].forEach((el) => {
+        const tag = String(el.tagName || '').toLowerCase();
+        if (!(safe && tag === 'script')) nodes.push({ tag, html: el.outerHTML });
+      });
+      return nodes;
+    };
 
     /* 保真所需的 head 不能只压成一坨 CSS 文本:
      * - <link rel="stylesheet"> 常承载字体/图标/整站样式;
@@ -173,21 +574,14 @@
      * - <style media> 的 media 属性一旦丢掉,打印样式会错误地套到屏幕上。
      * 因此保留原始节点及顺序,画布和导出都复用这一份。charset/viewport/title
      * 由导出器单独正规化,避免重复。 */
-    const headNodes = [...doc.head.children].map((el) => {
-      const tag = el.tagName.toLowerCase();
-      const name = (el.getAttribute('name') || '').toLowerCase();
-      if (tag === 'title' || (tag === 'meta' && (el.hasAttribute('charset') || name === 'viewport'))) return null;
-      return { tag, html: el.outerHTML };
-    }).filter(Boolean);
-    // 不规范但常见的生成页会把 style/link 放进 body。视觉上它们仍参与全局级联；
-    // 统一追加到结构化样式序列，避免导入时删除后在画布和导出里彻底消失。
-    [...doc.body.querySelectorAll('style, link[rel~="stylesheet" i]')].forEach((el) => {
-      headNodes.push({ tag: el.tagName.toLowerCase(), html: el.outerHTML });
-    });
+    const headNodes = collectHeadNodes(doc, false);
+    const safeHeadNodes = collectHeadNodes(safeDoc, true);
     const viewportEl = doc.querySelector('meta[name="viewport" i]');
     const viewport = viewportEl ? viewportEl.getAttribute('content') || '' : '';
     const baseEl = doc.head.querySelector('base[href]');
     const baseHref = baseEl ? baseEl.getAttribute('href') || '' : '';
+    const safeBaseEl = safeDoc.head.querySelector('base[href]');
+    const safeBaseHref = safeBaseEl ? safeBaseEl.getAttribute('href') || '' : '';
 
     // 收集内嵌样式
     const styleEls = [...doc.querySelectorAll('style')];
@@ -203,7 +597,7 @@
     // body 里的脚本用不可见 template 占位,否则全部挪到 </body> 前会改变执行时序。
     const scriptEls = [...doc.querySelectorAll('script')];
     const tailwindConfig = tailwindConfigOf(scriptEls);
-    const bodyScripts = [];
+    const bodyScripts = scriptEls.filter((s) => doc.body.contains(s)).map((s) => s.outerHTML);
     const scripts = scriptEls.map((s) => ({
       src: s.getAttribute('src') || '',
       content: s.getAttribute('src') ? '' : s.textContent,
@@ -211,26 +605,29 @@
       location: doc.body.contains(s) ? 'body' : 'head',
     }));
     if (scripts.length) report.kept = t('import.scriptsKept', { count: scripts.length });
-    scriptEls.forEach((n) => {
-      if (doc.body.contains(n)) {
-        const i = bodyScripts.length;
-        bodyScripts.push(n.outerHTML);
-        const marker = doc.createElement('template');
+    // Only the safe document receives inert placeholders. The raw copy above
+    // remains available to normal export, including script attributes/order.
+    let safeBodyScriptIndex = 0;
+    [...safeDoc.querySelectorAll('script')].forEach((n) => {
+      if (safeDoc.body.contains(n)) {
+        const i = safeBodyScriptIndex++;
+        const marker = safeDoc.createElement('template');
         marker.setAttribute('data-clay-script', String(i));
         n.replaceWith(marker);
       } else {
         n.remove();
       }
     });
-    const links = doc.querySelectorAll('link[rel="stylesheet"]');
+    const links = doc.querySelectorAll('link[rel~="stylesheet" i]');
     if (links.length) {
       const note = t('import.stylesKept', { count: links.length });
       report.kept = report.kept ? report.kept + `;${note}` : note;
     }
-    links.forEach((n) => n.remove());
-    doc.querySelectorAll('style').forEach((n) => n.remove());
+    safeDoc.querySelectorAll('link[rel~="stylesheet" i]').forEach((n) => n.remove());
+    safeDoc.querySelectorAll('style').forEach((n) => n.remove());
+    safeDoc.querySelectorAll('noscript').forEach((n) => n.remove());
 
-    const body = doc.body;
+    const body = safeDoc.body;
     // 页面标题:优先 <title>,没有就退回第一个大标题
     const titleEl = doc.querySelector('title');
     const h1 = doc.querySelector('h1, h2');
@@ -252,17 +649,27 @@
 
     return {
       bodyHtml: body.innerHTML,
+      rawBodyHtml: doc.body.innerHTML,
       bodyAttrs: attrsOf(body),
+      rawBodyAttrs: rawAttrsOf(doc.body),
+      safeBodyAttrs: attrsOf(body),
       bodyStyleMap: inlineStyleOf(body),
       bodyClass: (body.getAttribute('class') || '').trim(),
       bodyStyle: (body.getAttribute('style') || '').trim(),
-      htmlAttrs: attrsOf(doc.documentElement),
+      htmlAttrs: attrsOf(safeDoc.documentElement),
+      rawHtmlAttrs: rawAttrsOf(doc.documentElement),
+      safeHtmlAttrs: attrsOf(safeDoc.documentElement),
       viewport,
-      baseHref,
-      headNodes,
+      baseHref: safeBaseHref,
+      safeBaseHref,
+      rawBaseHref: baseHref,
+      headNodes: safeHeadNodes,
+      rawHeadNodes: headNodes,
+      safeHeadNodes,
+      authorActiveAttrs,
       bodyScripts,
       tailwindConfig,
-      fidelityVersion: 2,
+      fidelityVersion: 3,
       styleText,
       editorStyleText,
       title,
@@ -405,7 +812,7 @@
 
     // class/style 在 GrapesJS 中分别走 ClassManager / style model,不能只塞 attributes
     // (会被内部正规化吃掉);其余 data-*/lang/dir 等按普通属性保留。
-    const bodyAttrs = Object.assign({}, parsed.bodyAttrs || {});
+    const bodyAttrs = Object.assign({}, parsed.safeBodyAttrs || parsed.bodyAttrs || {});
     delete bodyAttrs.class;
     delete bodyAttrs.style;
     if (wrapper.addAttributes) wrapper.addAttributes(bodyAttrs);
@@ -424,5 +831,14 @@
     return parse(raw);
   }
 
-  window.ClayImporter = { importIntoEditor, detectTailwind, parseOnly };
+  window.ClayImporter = {
+    importIntoEditor,
+    detectTailwind,
+    parseOnly,
+    sanitizeCanvasMarkup,
+    sanitizeWorkspaceDocument,
+    normalizeHeadNodes,
+    restoreAuthorActiveAttrs,
+    AUTHOR_KEY_ATTR,
+  };
 })();

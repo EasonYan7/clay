@@ -4,22 +4,37 @@
   "version": "0.1.0",
   "description": "Turn AI-generated HTML into an editable visual canvas",
   "main": "main.js",
+  "engines": {
+    "node": ">=22.12.0"
+  },
   "scripts": {
     "start": "electron .",
+    "test": "npm run test:static && npm run test:gui",
+    "test:static": "node --check main.js && node --check preload.js && node --check renderer/app.js && node --check renderer/importer.js && node --check renderer/exporter.js && node --check tests/run-editor-behavior.js && node --check tests/fidelity.e2e.js && node --check tests/i18n.e2e.js && node --check tests/production-chain.e2e.js && node --check tests/renderer-state-regression-test.js && node --check tests/main-process-regression-test.js",
+    "test:gui": "npm run test:editor && npm run test:fidelity && npm run test:i18n && npm run test:renderer-state && npm run test:main-process && npm run test:production",
     "test:fidelity": "electron tests/fidelity.e2e.js",
     "test:editor": "node tests/run-editor-behavior.js",
     "test:i18n": "electron tests/i18n.e2e.js",
+    "test:renderer-state": "electron tests/renderer-state-regression-test.js",
+    "test:main-process": "electron tests/main-process-regression-test.js",
+    "test:production": "node tests/production-chain.e2e.js",
     "dist": "electron-builder --mac"
   },
   "devDependencies": {
-    "electron": "^33.0.0",
-    "electron-builder": "^25.0.0"
+    "electron": "^43.4.1",
+    "electron-builder": "^26.15.3"
   },
   "build": {
     "appId": "com.clay.editor",
     "productName": "Clay",
-    "directories": { "output": "dist" },
-    "files": ["main.js", "preload.js", "renderer/**/*"],
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "renderer/**/*"
+    ],
     "mac": {
       "target": "dir",
       "identity": null,

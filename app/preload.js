@@ -5,7 +5,16 @@ contextBridge.exposeInMainWorld('clay', {
     ipcRenderer.invoke('clay:save-file', defaultName, content, sourcePath),
   // 从桌面拖文件进窗口:拖来的 File 对象本身不带磁盘路径(渲染进程沙箱化后
   // File.path 已经拿不到了),要用主进程这边的 webUtils 才能换出真实路径。
-  getPathForFile: (file) => webUtils.getPathForFile(file),
+  getPathForFile: (file) => {
+    try {
+      const filePath = webUtils.getPathForFile(file);
+      // Drag-and-drop 的路径能力必须在主进程登记后,readPath 才会接受。
+      if (filePath) ipcRenderer.sendSync('clay:authorize-path-sync', filePath);
+      return filePath;
+    } catch (err) {
+      return '';
+    }
+  },
   writeFile: (filePath, content) => ipcRenderer.invoke('clay:write-file', filePath, content),
   exportPdf: (defaultName, content, width, height, sourcePath) =>
     ipcRenderer.invoke('clay:export-pdf', defaultName, content, width, height, sourcePath),
@@ -23,6 +32,7 @@ contextBridge.exposeInMainWorld('clay', {
   saveWorkspace: (json) => ipcRenderer.invoke('clay:save-workspace', json),
   // 关窗瞬间用同步通道,否则异步 IPC 还没往返完窗口就没了
   saveWorkspaceSync: (json) => ipcRenderer.sendSync('clay:save-workspace-sync', json),
+  // { status: 'valid', json, source } | { status: 'missing'|'corrupt'|'error', json: null }
   loadWorkspace: () => ipcRenderer.invoke('clay:load-workspace'),
   setLocale: (locale) => ipcRenderer.send('clay:set-locale', locale),
   reloadForLocale: (locale) => ipcRenderer.send('clay:reload-for-locale', locale),
@@ -34,6 +44,10 @@ contextBridge.exposeInMainWorld('clay', {
   },
   respondToClose: (shouldClose) => ipcRenderer.send('clay:close-result', !!shouldClose),
   ...(process.env.CLAY_TEST_CLOSE
-    ? { testRequestClose: () => ipcRenderer.send('clay:test-close-window') }
+    ? {
+      testRequestClose: () => ipcRenderer.send('clay:test-close-window'),
+      testTriggerStaleWatchError: () => ipcRenderer.send('clay:test-trigger-stale-watch-error'),
+      testSourceWatchPath: () => ipcRenderer.invoke('clay:test-source-watch-path'),
+    }
     : {}),
 });

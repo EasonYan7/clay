@@ -7,6 +7,14 @@ const path = require('path');
 const testDir = fs.mkdtempSync(path.join(os.tmpdir(), 'clay-i18n-test-'));
 app.setPath('userData', path.join(testDir, 'user-data'));
 
+async function waitForClayReady(win) {
+  await win.webContents.executeJavaScript(`(async () => {
+    if (!window.__clayReady) throw new Error('window.__clayReady is missing');
+    await window.__clayReady;
+    return true;
+  })()`);
+}
+
 app.whenReady().then(async () => {
   const win = new BrowserWindow({
     width: 1280,
@@ -19,6 +27,7 @@ app.whenReady().then(async () => {
     await win.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'));
     await win.webContents.executeJavaScript(`localStorage.setItem('clay-locale', 'en-US')`);
     await win.reload();
+    await waitForClayReady(win);
     await new Promise((resolve) => setTimeout(resolve, 500));
 
     const home = await win.webContents.executeJavaScript(`({
@@ -42,6 +51,7 @@ app.whenReady().then(async () => {
       const loaded = new Promise((resolve) => win.webContents.once('did-finish-load', resolve));
       await win.webContents.executeJavaScript(`window.ClayI18n.setLocale(${JSON.stringify(locale)})`);
       await loaded;
+      await waitForClayReady(win);
       await new Promise((resolve) => setTimeout(resolve, 250));
     }
     await switchLocale('zh-CN');
@@ -110,8 +120,12 @@ app.whenReady().then(async () => {
     process.exitCode = 1;
   } finally {
     win.destroy();
-    if (!process.exitCode) fs.rmSync(testDir, { recursive: true, force: true });
-    else process.stderr.write(`i18n test data preserved at ${testDir}\n`);
+    // Wait for Electron's quit event before removing the profile.  The
+    // renderer/helper process can still be flushing files after destroy().
+    app.once('quit', () => {
+      if (!process.exitCode) fs.rmSync(testDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+      else process.stderr.write(`i18n test data preserved at ${testDir}\n`);
+    });
     app.quit();
   }
 });

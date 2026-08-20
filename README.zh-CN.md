@@ -12,7 +12,7 @@
 
 <p align="center">
   <img alt="macOS" src="https://img.shields.io/badge/macOS-当前支持-111111?style=flat-square&amp;logo=apple" />
-  <img alt="Electron 33" src="https://img.shields.io/badge/Electron-33-47848F?style=flat-square&amp;logo=electron&amp;logoColor=white" />
+  <img alt="Electron 43" src="https://img.shields.io/badge/Electron-43-47848F?style=flat-square&amp;logo=electron&amp;logoColor=white" />
   <img alt="Local first" src="https://img.shields.io/badge/Local--first-无需账号-6D4AFF?style=flat-square" />
   <img alt="Languages" src="https://img.shields.io/badge/UI-中文%20%7C%20English-2EA44F?style=flat-square" />
   <a href="./LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/License-MIT-F4B942?style=flat-square" /></a>
@@ -89,7 +89,7 @@ Clay 不要求登录账号，也不会把你打开的 HTML 主动上传到服务
 ### 环境要求
 
 - macOS
-- Node.js 与 npm
+- Node.js >= 22.12.0 与 npm
 - Git（用于克隆仓库）
 
 ### 从源码运行
@@ -98,6 +98,7 @@ Clay 不要求登录账号，也不会把你打开的 HTML 主动上传到服务
 git clone https://github.com/EasonYan7/clay.git
 cd clay/app
 npm install
+npm test
 npm start
 ```
 
@@ -154,14 +155,24 @@ Clay 会尽量保留原始 HTML、CSS 与脚本，只把画布中的修改单独
 
 ```bash
 cd app
+npm test
 npm run test:editor
 npm run test:fidelity
 npm run test:i18n
+npm run test:renderer-state
+npm run test:main-process
+npm run test:production
 ```
 
+- `npm test`：运行静态检查和完整 Electron 测试套件
+- `test:production`：启动真实的 `electron .`，覆盖主进程、preload 桥接、文件能力校验、保存、工作区恢复、PDF 与正常退出
+- `test:renderer-state`：覆盖编辑器状态、富文本收口、CSS 脏状态与切页竞态
+- `test:main-process`：覆盖 PDF 脚本隔离、页面高度拒绝、路径能力与工作区备份恢复
 - `test:editor`：编辑、历史、拖拽、保存与退出行为
 - `test:fidelity`：导入、画布渲染和导出结果保真
 - `test:i18n`：中文与英文界面、动态文案和弹窗
+
+CI 会在 macOS 上运行 GUI 套件，并在 Linux/Xvfb 下做行为检查；Linux 不能替代 macOS 窗口管理器与 Metal 验证。
 
 <details>
 <summary><strong>查看项目结构</strong></summary>

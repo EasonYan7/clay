@@ -1,0 +1,75 @@
+name: Clay CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  static-and-audit:
+    name: Static checks and audit
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Use Electron-supported Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.12.0
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - name: Install dependencies
+        run: npm ci --prefix app
+      - name: Run static checks
+        run: npm run test:static --prefix app
+      - name: Reject high or critical advisories
+        run: npm audit --audit-level=high --prefix app
+
+  electron-macos:
+    name: Electron E2E (macOS)
+    runs-on: macos-14
+    timeout-minutes: 30
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Use Electron-supported Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.12.0
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - name: Install PDF inspection tools
+        run: brew list poppler >/dev/null 2>&1 || brew install poppler
+      - name: Install dependencies
+        run: npm ci --prefix app
+      # This validates the real app/main/preload path in the hosted macOS
+      # session. It does not claim signed/notarized distribution readiness.
+      - name: Run Electron GUI suites
+        run: npm run test:gui --prefix app
+
+  electron-linux:
+    name: Electron E2E (Linux/Xvfb)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Use Electron-supported Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.12.0
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - name: Install GUI runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb libgtk-3-0 libnotify4 libnss3 libgbm1 libasound2 poppler-utils
+      - name: Install dependencies
+        run: npm ci --prefix app
+      # Xvfb covers the Linux display requirement; it is a behavioral check,
+      # not a substitute for macOS window-manager or Metal validation.
+      - name: Run Electron GUI suites under Xvfb
+        run: xvfb-run --auto-servernum --server-args="-screen 0 1440x900x24" npm run test:gui --prefix app

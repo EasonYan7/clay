@@ -12,7 +12,7 @@
 
 <p align="center">
   <img alt="macOS" src="https://img.shields.io/badge/macOS-Supported-111111?style=flat-square&amp;logo=apple" />
-  <img alt="Electron 33" src="https://img.shields.io/badge/Electron-33-47848F?style=flat-square&amp;logo=electron&amp;logoColor=white" />
+  <img alt="Electron 43" src="https://img.shields.io/badge/Electron-43-47848F?style=flat-square&amp;logo=electron&amp;logoColor=white" />
   <img alt="Local first" src="https://img.shields.io/badge/Local--first-No_account-6D4AFF?style=flat-square" />
   <img alt="Languages" src="https://img.shields.io/badge/UI-中文%20%7C%20English-2EA44F?style=flat-square" />
   <a href="./LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/License-MIT-F4B942?style=flat-square" /></a>
@@ -89,7 +89,7 @@ If the original page references remote fonts, images, styles, or scripts, previe
 ### Requirements
 
 - macOS
-- Node.js and npm
+- Node.js >= 22.12.0 and npm
 - Git for cloning the repository
 
 ### Run from source
@@ -98,6 +98,7 @@ If the original page references remote fonts, images, styles, or scripts, previe
 git clone https://github.com/EasonYan7/clay.git
 cd clay/app
 npm install
+npm test
 npm start
 ```
 
@@ -154,14 +155,24 @@ Clay is currently developed and tested only on macOS. Its foundation is cross-pl
 
 ```bash
 cd app
+npm test
 npm run test:editor
 npm run test:fidelity
 npm run test:i18n
+npm run test:renderer-state
+npm run test:main-process
+npm run test:production
 ```
 
-- `test:editor` covers editing, history, drag and drop, saving, and quitting
+- `npm test` runs static checks and the complete Electron suite.
+- `test:production` starts the real `electron .` app and exercises the main process, preload bridge, file capability checks, save, workspace recovery, PDF, and clean exit.
+- `test:renderer-state` covers editor state, RTE flush, CSS dirty state, and navigation regressions.
+- `test:main-process` covers PDF script isolation, page-height rejection, path capabilities, and workspace backup recovery.
 - `test:fidelity` covers import, canvas rendering, and exported output
 - `test:i18n` covers Chinese and English UI, dynamic copy, and dialogs
+
+For CI, the GUI suites run on macOS and under Xvfb on Linux; the Linux job is a
+behavioral check and does not replace macOS window-manager or Metal validation.
 
 <details>
 <summary><strong>View the project structure</strong></summary>

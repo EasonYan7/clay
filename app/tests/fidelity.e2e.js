@@ -32,6 +32,14 @@ fs.writeFileSync(path.join(testDir, 'fidelity.css'), '#probe{color:rgb(1,2,3)}',
 
 function wait(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 
+async function waitForClayReady(win) {
+  await win.webContents.executeJavaScript(`(async () => {
+    if (!window.__clayReady) throw new Error('window.__clayReady is missing');
+    await window.__clayReady;
+    return true;
+  })()`);
+}
+
 app.whenReady().then(async () => {
   const win = new BrowserWindow({
     show: false,
@@ -41,6 +49,7 @@ app.whenReady().then(async () => {
   });
   try {
     await win.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'));
+    await waitForClayReady(win);
     await wait(500);
     const result = await win.webContents.executeJavaScript(`(async () => {
       const raw = ${JSON.stringify(fixture)};
@@ -121,13 +130,19 @@ app.whenReady().then(async () => {
     assert.match(out, /\/\* Clay 中调整的部分 \*\/[\s\S]*#probe\{color:rgb\(9, 8, 7\);\}/);
 
     process.stdout.write('fidelity.e2e: ok\n');
-    app.exit(0);
   } catch (err) {
     process.stderr.write((err && err.stack) || String(err));
     process.stderr.write('\n');
-    app.exit(1);
+    process.exitCode = 1;
   } finally {
     try { win.destroy(); } catch (e) { /* already closed */ }
-    fs.rmSync(testDir, { recursive: true, force: true });
+    // Chromium may still flush profile files after the window is destroyed.
+    // Clean only after Electron has emitted `quit`, otherwise the recursive
+    // delete races the helper process and leaves flaky ENOENT/EBUSY failures.
+    app.once('quit', () => {
+      if (!process.exitCode) fs.rmSync(testDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+      else process.stderr.write(`fidelity test data preserved at ${testDir}\n`);
+    });
+    app.quit();
   }
 });

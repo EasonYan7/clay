@@ -47,6 +47,9 @@
   const docs = [];             // { id, name, isTailwind, scripts, data }
   let activeDocId = null;
   let docSeq = 0;
+  // async 边界操作共享一个“最新导航”版本。RTE flush/confirm 等 await 期间若
+  // 用户又点了另一页或回主页，旧操作回来后必须自觉退出，不能覆盖最新选择。
+  let navigationVersion = 0;
 
   /* 工作区持久化:关掉应用不丢活儿。
    * 桌面端写磁盘(userData/workspace.json)—— localStorage 只有 5-10MB,
@@ -60,6 +63,16 @@
    * 这期间若发生任何保存(尤其是关窗时的 beforeunload),就会拿空数组
    * 覆盖掉用户的存档 —— 真实丢过一次数据。读完之前一律禁止写。 */
   let restored = false;
+  let workspaceWritable = false;
+  let workspaceStatus = 'pending';
+  let resolveWorkspaceReady;
+  let workspaceReadyResolved = false;
+  const workspaceReady = new Promise((resolve) => { resolveWorkspaceReady = resolve; });
+  // Public readiness contract: import/open automation must wait for the
+  // restore decision instead of racing an empty in-memory workspace.
+  window.__clayReady = workspaceReady;
+  let persistChain = Promise.resolve();
+  let persistGeneration = 0;
 
   /* 最近编辑过的文件(MRU,最多 9 个,存路径)。跨重启持久化,和 docs 一起存。
    * 主页在"用过编辑"后用它显示最近记录;源文件删/移则渲染时过滤掉不显示。 */
@@ -84,12 +97,54 @@
   }
 
   let cleanExitCommitted = false;
+  let committingClose = false;
+
+  function finishWorkspaceReady(status, writable) {
+    workspaceStatus = status;
+    workspaceWritable = !!writable;
+    if (workspaceReadyResolved) return;
+    workspaceReadyResolved = true;
+    resolveWorkspaceReady({ status, writable: workspaceWritable });
+  }
+
+  async function waitWorkspaceReady(requireWritable) {
+    const state = await workspaceReady;
+    if (requireWritable && (!state || !state.writable)) {
+      toast(t('status.workspaceReadOnly'));
+      return false;
+    }
+    return true;
+  }
+
+  function normalizeWorkspaceLoad(result) {
+    if (typeof result === 'string') return { status: 'valid', json: result, source: 'primary' };
+    if (result === null || result === undefined) return { status: 'missing', json: null, source: 'primary' };
+    if (!result || typeof result !== 'object') return { status: 'error', json: null, error: 'invalid-workspace-response' };
+    const status = result.status;
+    if (status === 'valid' && typeof result.json === 'string') {
+      return { status, json: result.json, source: result.source === 'backup' ? 'backup' : 'primary' };
+    }
+    if (status === 'missing' || status === 'corrupt') return { status, json: null, source: result.source };
+    return { status: 'error', json: null, error: 'invalid-workspace-response' };
+  }
+
+  function parseWorkspaceJson(raw) {
+    if (typeof raw !== 'string' || !raw.trim()) return null;
+    try {
+      const value = JSON.parse(raw);
+      if (!value || typeof value !== 'object' || !Array.isArray(value.docs)) return null;
+      return value;
+    } catch (e) {
+      return null;
+    }
+  }
 
   /* 在批准关窗之前同步写入“会话已结束”。不能只异步 persist 后立刻关窗:
    * beforeunload 或尚在路上的自动保存可能把旧 docs 再写回来,造成下次又出现紫点和退出提示。 */
   function commitClosedWorkspace() {
-    if (!restored) return false;
+    if (!restored || !workspaceWritable) return false;
     clearTimeout(persistTimer);
+    persistGeneration++;
     const json = workspaceJson(true);
     let ok = false;
     if (window.clay && window.clay.saveWorkspaceSync) ok = !!window.clay.saveWorkspaceSync(json);
@@ -101,24 +156,52 @@
     return ok;
   }
 
-  async function persist() {
-    if (!restored) return;      // 没读完不许写,宁可不存也不能覆盖
+  async function commitClosedWorkspaceSafely(boundaryToken) {
+    if (!restored || !workspaceWritable) return false;
+    clearTimeout(persistTimer);
+    committingClose = true;
+    persistGeneration++;
+    try { await persistChain; } catch (e) { /* persist already reports its failure */ }
+    if (boundaryToken && (boundaryToken.nav !== navigationVersion
+      || boundaryToken.ed !== editor || boundaryToken.active !== activeDocId)) {
+      committingClose = false;
+      return false;
+    }
+    try { return commitClosedWorkspace(); }
+    finally { committingClose = false; }
+  }
+
+  function persist() {
+    if (!restored || !workspaceWritable || committingClose || cleanExitCommitted) return Promise.resolve(false);      // 没读完/只读/退出收口不许写
     snapshotActive();
     const json = workspaceJson();
-    if (hasDisk) {
-      const r = await window.clay.saveWorkspace(json);
-      if (!r || !r.ok) {
-        if (!persistWarned) { persistWarned = true; toast(t('status.autoSaveFailed', { error: r && r.error || '' })); }
-      } else {
+    const generation = ++persistGeneration;
+    persistChain = persistChain.catch(() => false).then(async () => {
+      if (!restored || !workspaceWritable || cleanExitCommitted || generation !== persistGeneration) return false;
+      if (hasDisk) {
+        const r = await window.clay.saveWorkspace(json);
+        if (!restored || !workspaceWritable || cleanExitCommitted || generation !== persistGeneration) return false;
+        if (!r || !r.ok) {
+          if (!persistWarned) { persistWarned = true; toast(t('status.autoSaveFailed', { error: r && r.error || '' })); }
+          return false;
+        }
         persistWarned = false;
+        return true;
       }
-      return;
-    }
-    try {
-      localStorage.setItem(STORE_KEY, json);
-    } catch (e) {
-      if (!persistWarned) { persistWarned = true; toast(t('status.storageFull')); }
-    }
+      try { localStorage.setItem(STORE_KEY, json); return true; }
+      catch (e) {
+        if (!persistWarned) { persistWarned = true; toast(t('status.storageFull')); }
+        return false;
+      }
+    }).catch((err) => {
+      if (!restored || !workspaceWritable || cleanExitCommitted || generation !== persistGeneration) return false;
+      if (!persistWarned) {
+        persistWarned = true;
+        toast(t('status.autoSaveFailed', { error: err && err.message || '' }));
+      }
+      return false;
+    });
+    return persistChain;
   }
 
   function schedulePersist() {
@@ -127,35 +210,87 @@
   }
 
   async function restoreWorkspace() {
-    let raw = null;
+    let load;
     try {
-      if (hasDisk) raw = await window.clay.loadWorkspace();
-      else raw = localStorage.getItem(STORE_KEY);
-    } catch (e) { /* 读失败:下面会保持 restored=false,绝不写入 */ }
+      load = normalizeWorkspaceLoad(hasDisk ? await window.clay.loadWorkspace() : localStorage.getItem(STORE_KEY));
+    } catch (e) {
+      // IPC/read failures are not equivalent to an empty or corrupt file. Keep
+      // writes closed so a transient main-process fault cannot overwrite data.
+      toast(t('status.workspaceReadFailed'));
+      await renderHome();
+      finishWorkspaceReady('error', false);
+      return false;
+    }
 
-    let saved = null;
-    try { saved = JSON.parse(raw || 'null'); } catch (e) { /* 损坏则当空工作区 */ }
+    if (load.status === 'error') {
+      toast(t('status.workspaceReadFailed'));
+      await renderHome();
+      finishWorkspaceReady('error', false);
+      return false;
+    }
+
+    let saved = parseWorkspaceJson(load.json);
+    // A legacy/raw response may claim "valid" while containing malformed
+    // JSON. Treat that the same as an explicit corrupt status before deciding
+    // whether the browser-side migration source is eligible.
+    if (load.status === 'valid' && !saved) load.status = 'corrupt';
+    let migrated = false;
+    if ((load.status === 'missing' || load.status === 'corrupt') && hasDisk) {
+      let legacyRaw = null;
+      try { legacyRaw = localStorage.getItem(STORE_KEY); } catch (e) { legacyRaw = null; }
+      const legacy = parseWorkspaceJson(legacyRaw);
+      if (legacy) {
+        saved = legacy;
+        migrated = true;
+        if (load.status === 'corrupt') toast(t('status.workspaceCorruptMigrated'));
+      }
+    }
+    if (load.status === 'valid' && load.source === 'backup') toast(t('status.workspaceBackupRecovered'));
+    if (load.status === 'corrupt' && !saved) {
+      toast(t('status.workspaceCorrupt'));
+      if (!hasDisk && load.json) {
+        try { localStorage.setItem(STORE_KEY + '.corrupt-recovery', load.json); } catch (e) { /* keep warning */ }
+      }
+      restored = true;
+      await renderHome();
+      finishWorkspaceReady('corrupt', true);
+      return false;
+    }
 
     if (saved && Array.isArray(saved.recents)) recents = saved.recents.slice(0, RECENTS_MAX);
 
-    const savedDocs = saved && Array.isArray(saved.docs) ? saved.docs : [];
+    const savedDocs = saved && Array.isArray(saved.docs)
+      ? saved.docs.map((d) => {
+        // One malformed legacy entry must not abort the whole restore (and
+        // must never reach GrapesJS before the sanitizer has had a chance to
+        // remove executable project fields).
+        try { return window.ClayImporter.sanitizeWorkspaceDocument(d); }
+        catch (e) { return null; }
+      }).filter(Boolean)
+      : [];
     // 旧版本没有 sessionOpen,它留下的 docs 可能正是“直接退出”后的废弃恢复稿。
     // 从本版本起只有明确标为运行中、随后异常中断的会话才允许恢复。
     const shouldRecover = !!(saved && saved.sessionOpen === true && savedDocs.length);
     if (!recents.length) savedDocs.forEach((d) => { if (d.sourcePath) addRecent(d.sourcePath, d.name); });
 
     if (!shouldRecover) {
-      restored = true;          // 正常收尾或旧版遗留会话都从空标签开始,之后可以正常保存
-      renderHome();             // 可能有最近记录 → 渲染最近区;没有则手绘引导页
+      restored = true;
+      workspaceWritable = true;
+      if (migrated) await persist();
+      await renderHome();             // 可能有最近记录 → 渲染最近区;没有则手绘引导页
+      finishWorkspaceReady('valid', true);
       return false;
     }
     savedDocs.forEach((d) => docs.push(d));
     docSeq = saved.docSeq || docs.length;
-    restored = true;            // 数据已进内存,现在保存才是安全的
+    restored = true;
+    workspaceWritable = true;
     renderTabs();
     // 冷启动永远落主页。文档工程仍保留在标签页里、最近文件仍显示在主页,
     // 只是不要替用户擅自重开上次那一页;点标签后才真正载入编辑器。
-    goHome();
+    if (migrated) await persist();
+    await goHome();
+    finishWorkspaceReady('valid', true);
     return true;
   }
 
@@ -172,10 +307,15 @@
     renderHome();
   }
   async function openRecent(path) {
+    if (!await waitWorkspaceReady(true)) return false;
     if (!(window.clay && window.clay.readPath)) return;
-    const f = await window.clay.readPath(path);
-    if (!f) { toast(t('status.fileUnavailable')); removeRecent(path); return; }
-    runImport(f.content, f.name.replace(/\.html?$/i, ''), f.path);
+    const version = ++navigationVersion;
+    let f;
+    try { f = await window.clay.readPath(path); }
+    catch (e) { toast(t('status.fileUnavailable')); return false; }
+    if (version !== navigationVersion) return false;
+    if (!f) { toast(t('status.fileUnavailable')); removeRecent(path); return false; }
+    return runImport(f.content, f.name.replace(/\.html?$/i, ''), f.path);
   }
 
   // 只显示父级文件夹名,别把整条长路径糊上去
@@ -187,7 +327,7 @@
   /* 主页两态:
    *  - 没有最近记录(第一次用)→ 保持原来的手绘引导页(带指向工具栏的箭头)
    *  - 有最近记录 → 左侧放"打开文件",右侧一格最近编辑卡片;删/移的文件不显示 */
-  async function renderHome() {
+  async function renderHome(navigationToken) {
     const es = $('#empty-state');
     if (!es || es.hidden) return;   // 不在主页就不折腾
     let list = recents.slice(0, RECENTS_MAX);
@@ -199,12 +339,14 @@
         list = list.filter((r) => set.has(r.path));
       } catch (e) { /* 查不了就先都显示 */ }
     }
+    if (navigationToken !== undefined && navigationToken !== navigationVersion) return false;
     const card = $('.empty-card');
     const has = list.length > 0;
     card.classList.toggle('has-recents', has);
     $('#empty-recents').hidden = !has;
     renderRecentCards(list);
     drawSketch();   // drawSketch 内部会因 has-recents 而不画箭头
+    return true;
   }
 
   function renderRecentCards(list) {
@@ -533,8 +675,24 @@
    * <head> 末尾——它排在 GrapesJS 解析后的样式之后,同权重时原文获胜,var() 规则得以
    * 正常渲染;用户在面板上的改动走 #id 规则(优先级更高)照常覆盖,不受影响。
    * 只影响画布显示:不进组件模型、不进撤销栈、不进导出。id 固定,切文档时整块换成当前页的原文。 */
-  function applyCanvasFidelityHead(doc, page) {
-    const source = (page.headNodes || []).filter((n) => {
+  function applyCanvasFidelityHead(doc, page, ed) {
+    let source = (window.ClayImporter && window.ClayImporter.normalizeHeadNodes)
+      ? window.ClayImporter.normalizeHeadNodes(page.safeHeadNodes || page.headNodes || [], true, { dropped: [] })
+      : (page.safeHeadNodes || page.headNodes || []);
+    const deleted = window.ClayExporter && window.ClayExporter.extractDeletedRuleKeys
+      ? window.ClayExporter.extractDeletedRuleKeys(ed, page.baselineRules)
+      : new Set();
+    source = source.map((n) => {
+      if (!n || !n.html || n.tag !== 'style') return n;
+      const holder = doc.createElement('template');
+      holder.innerHTML = n.html.trim();
+      const style = holder.content.firstElementChild;
+      if (style && window.ClayExporter && window.ClayExporter.filterCssRules) {
+        style.textContent = window.ClayExporter.filterCssRules(style.textContent || '', deleted, style.getAttribute('media') || '');
+        n = { tag: 'style', html: style.outerHTML };
+      }
+      return n;
+    }).filter((n) => {
       if (!n || !n.html) return false;
       if (n.tag === 'style') return true;
       if (n.tag !== 'link') return false;
@@ -619,9 +777,12 @@
     try {
       const doc = ed.Canvas.getDocument();
       if (doc && doc.head) {
-        applyCanvasBase(doc, d.sourcePath, d.baseHref);  // 相对资源与作者自己的 <base> 均按原件解析
-        applyCanvasHtmlAttrs(doc, d.htmlAttrs);          // html.dark / data-theme / dir / lang
-        applyCanvasFidelityHead(doc, d);                 // 外链字体、style media、var() 原始规则
+        // An empty safeBaseHref is an intentional sanitization result (for
+        // example javascript:). Never fall back to the raw export-only base
+        // when healing the live canvas.
+        applyCanvasBase(doc, d.sourcePath, typeof d.safeBaseHref === 'string' ? d.safeBaseHref : '');
+        applyCanvasHtmlAttrs(doc, d.safeHtmlAttrs || d.htmlAttrs);          // html.dark / data-theme / dir / lang
+        applyCanvasFidelityHead(doc, d, ed);                 // 外链字体、style media、var() 原始规则
         applyCanvasClayOverrides(doc, ed, d);            // 最终级联顺序:解析结果 < 原件 < Clay 调整
         applyCanvasTailwindConfig(doc, d);               // 仅应用安全解析出的纯数据 Tailwind config
       }
@@ -1445,11 +1606,15 @@
     setSketchHidden(true);   // 进画布后收掉标注,别挡着干活
   }
 
-  function goHome() {
+  async function goHome() {
+    const version = ++navigationVersion;
+    await reconcileBeforeBoundary();
+    if (version !== navigationVersion) return false;
     snapshotActive();
     if (editor) editor.select(null);
     activeDocId = null;
-    syncSourceWatch();
+    await syncSourceWatch();
+    if (version !== navigationVersion) return false;
     $('#empty-state').hidden = false;
     // 没打开页面时属性面板是空的,收起来把画布让出来
     $('#sidebar').hidden = true;
@@ -1457,7 +1622,8 @@
     applyTheme(localStorage.getItem('clay-theme') !== 'dark');
     refreshSelectionUI();
     renderTabs();
-    renderHome();
+    await renderHome(version);
+    return version === navigationVersion;
   }
 
   /* ── 主题 ──────────────────────────────────
@@ -1608,22 +1774,38 @@
   }
   window.addEventListener('resize', () => { clearTimeout(drawSketch._t); drawSketch._t = setTimeout(drawSketch, 120); });
 
-  function activateDoc(id) {
-    if (id === activeDocId) { showCanvas(); syncSourceWatch(); return; }
+  async function activateDoc(id) {
+    if (!await waitWorkspaceReady(true)) return false;
+    const version = ++navigationVersion;
+    // 切页是文档边界:先结束当前 RTE,再按当前页/编辑器实例同步脏状态。
+    await reconcileBeforeBoundary();
+    if (version !== navigationVersion) return false;
+    if (id === activeDocId) {
+      showCanvas();
+      await syncSourceWatch();
+      return version === navigationVersion;
+    }
     snapshotActive();
     const d = docs.find((x) => x.id === id);
-    if (!d) return;
+    if (!d) return false;
     activeDocId = id;
     docTailwind = d.isTailwind;
     const ed = ensureEditor(d.isTailwind);
     scheduleCanvasHeal(ed, d.id);   // 相对路径图片要指回这个文档的源目录;装完内容后再补,见函数注释
     histSuppressed = true;
-    ed.loadProjectData(d.data);
-    // 上一个文档的撤销栈对这个文档毫无意义,还会串门:清掉,历史从本次打开重新记
-    ed.UndoManager.clear();
-    histSuppressed = false;
+    // GrapesJS 的 loadData 会在装载过程中补写组件/样式快照；不要把这些
+    // 内部变换直接写回文档缓存，否则快速切页后旧页的 data 会被清成当前页。
+    let project = d.data || {};
+    try { project = JSON.parse(JSON.stringify(project)); } catch (e) { /* 旧缓存不可 clone 时沿用原值 */ }
+    try {
+      ed.loadProjectData(project);
+      // 上一个文档的撤销栈对这个文档毫无意义,还会串门:清掉,历史从本次打开重新记
+      ed.UndoManager.clear();
+    } finally {
+      histSuppressed = false;
+    }
     // 会话基线:记下打开时刻的内容签名;打开时就带的脏要一直背着,直到真的存盘
-    setSessionMark(d.id, claySig(ed), !!d.dirty);
+    setSessionMark(d.id, claySig(ed, d), !!d.dirty);
     scheduleHistory();
     ed.select(null);          // 别把上一个文档的选中项带过来
     refreshSelectionUI();
@@ -1631,17 +1813,46 @@
     renderTabs();
     setDevice('desktop');
     syncThemeToPage(ed, d);   // 编辑器皮肤跟着这个页面的配色
-    syncSourceWatch();         // 监听当前源文件;初始快照也能发现 Clay 关闭期间的外部修改
+    await syncSourceWatch();   // 监听当前源文件;初始快照也能发现 Clay 关闭期间的外部修改
+    return version === navigationVersion;
   }
 
   async function closeDoc(id) {
+    if (!await waitWorkspaceReady(true)) return false;
+    const version = ++navigationVersion;
     let d = docs.find((x) => x.id === id);
-    if (!d) return;
+    if (!d) return false;
+    // 兼容旧工作区/外部调用直接写入的 dirty 标记:它可能尚未有对应的
+    // sessionMark(baseDirty)。如果本次边界没有发现新的模型差异，也不能因
+    // 重新计算而把这类明确标记静默抹掉；正常编辑产生的脏状态仍由基线比较决定。
+    const dirtyHint = !!d.dirty;
+
+    // 关闭任一标签都可能结束当前正在编辑的文档,不能让最后一段 RTE 文本
+    // 留在 iframe DOM 里而未进入组件模型/脏状态。
+    await reconcileBeforeBoundary();
+    if (version !== navigationVersion) return false;
+    d = docs.find((x) => x.id === id);
+    if (!d) return false;
+    const mark = sessionMark[id];
+    const undoStack = editor && editor.UndoManager && editor.UndoManager.getStack && editor.UndoManager.getStack();
+    const hasUndoHistory = !!(undoStack && undoStack.length);
+    if (dirtyHint && !d.dirty && !(mark && mark.baseDirty) && !hasUndoHistory) {
+      d.dirty = true;
+      renderTabs();
+    }
 
     /* 有没存的修改就先问,Word 的三选一。
      * 先把这个标签页亮出来再问 —— 不能让用户对着别的页面替它做决定。 */
     if (d.dirty) {
-      if (id !== activeDocId) activateDoc(id);
+      if (id !== activeDocId) {
+        const activated = await activateDoc(id);
+        if (!activated) return false;
+        // 等待 RTE flush/装载期间若用户又切到了别页,不要对已经离开的
+        // 页面弹窗或继续执行关闭。
+        if (id !== activeDocId) return false;
+      }
+      const promptVersion = navigationVersion;
+      const promptEditor = editor;
       const hasSrc = !!d.sourcePath;
       const r = await confirmBox({
         type: 'question',
@@ -1653,23 +1864,28 @@
         defaultId: 0,
         cancelId: 2,
       });
-      if (r === 2) return;
+      if (id !== activeDocId || promptVersion !== navigationVersion || promptEditor !== editor) return false;
+      if (r === 2) return false;
       if (r === 0) {
         const ok = await (hasSrc ? saveToSource() : saveAsCopy());
-        if (!ok) return;   // 保存框被取消,关闭也一并作罢
+        if (!ok || id !== activeDocId || promptVersion !== navigationVersion || promptEditor !== editor) return false;   // 保存框被取消,关闭也一并作罢
       }
     }
 
     const i = docs.findIndex((x) => x.id === id);   // 弹窗期间顺序可能变了,重新找
-    if (i < 0) return;
+    if (i < 0 || (d.dirty && id !== activeDocId)) return false;
     const wasActive = id === activeDocId;
     docs.splice(i, 1);
-    if (!wasActive) { renderTabs(); persist(); return; }
+    if (!wasActive) { renderTabs(); persist(); return true; }
     activeDocId = null;
     const next = docs[i] || docs[i - 1];
-    if (next) activateDoc(next.id);
-    else goHome();
+    if (next) {
+      if (!await activateDoc(next.id)) return false;
+    } else if (!await goHome()) {
+      return false;
+    }
     persist();
+    return true;
   }
 
   /* ── 同一份内容不重复开 ────────────────────
@@ -1704,7 +1920,8 @@
    * Clay 内有未保存修改:绝不静默覆盖,让用户明确选择;若选择保留 Clay 版本,
    * 冲突状态会一直留到另存为/明确覆盖源文件为止。 */
   async function reloadActiveFromSource(d, raw) {
-    if (!d || d.id !== activeDocId || !raw) return false;
+    // 空字符串是合法的外部文件内容(0 字节文件),不能用 !raw 把它当失败。
+    if (!d || d.id !== activeDocId || raw === null || raw === undefined) return false;
     const device = (editor && editor.getDevice && editor.getDevice()) || 'desktop';
     try {
       const tw = window.ClayImporter.detectTailwind(raw);
@@ -1726,11 +1943,18 @@
       d.docTitle = result.docTitle || '';
       d.headMeta = result.headMeta || [];
       d.headLinks = result.headLinks || [];
-      d.htmlAttrs = result.htmlAttrs || {};
-      d.bodyAttrs = result.bodyAttrs || {};
+      d.htmlAttrs = result.rawHtmlAttrs || result.htmlAttrs || {};
+      d.safeHtmlAttrs = result.safeHtmlAttrs || result.htmlAttrs || {};
+      d.bodyAttrs = result.rawBodyAttrs || result.bodyAttrs || {};
+      d.safeBodyAttrs = result.safeBodyAttrs || result.bodyAttrs || {};
       d.viewport = result.viewport || '';
-      d.baseHref = result.baseHref || '';
-      d.headNodes = result.headNodes || [];
+      d.baseHref = result.rawBaseHref || result.baseHref || '';
+      d.safeBaseHref = typeof result.safeBaseHref === 'string' ? result.safeBaseHref
+        : (typeof result.baseHref === 'string' ? result.baseHref : '');
+      d.headNodes = result.rawHeadNodes || result.headNodes || [];
+      d.safeHeadNodes = result.safeHeadNodes || result.headNodes || [];
+      d.rawBodyHtml = result.rawBodyHtml || '';
+      d.authorActiveAttrs = result.authorActiveAttrs || {};
       d.bodyScripts = result.bodyScripts || [];
       d.fidelityVersion = result.fidelityVersion || 1;
       d.baselineRules = result.baselineRules || {};
@@ -1740,7 +1964,7 @@
       d.dirty = false;
       delete d.externalConflict;
 
-      setSessionMark(d.id, claySig(ed), false);
+      setSessionMark(d.id, claySig(ed, d), false);
       scheduleCanvasHeal(ed, d.id);
       scheduleHistory();
       ed.select(null);
@@ -1759,6 +1983,9 @@
   }
 
   async function applySourceChange(change) {
+    const version = ++navigationVersion;
+    await reconcileBeforeBoundary();
+    if (version !== navigationVersion) return;
     const d = docs.find((x) => x.id === activeDocId);
     if (!d || !d.sourcePath || !change || change.path !== d.sourcePath) return;
 
@@ -1774,7 +2001,7 @@
       return;
     }
 
-    const raw = change.content || '';
+    const raw = change.content === null || change.content === undefined ? '' : String(change.content);
     const incomingHash = hashOf(raw);
     if (incomingHash === d.sourceHash) {
       // 外部版本又回到了 Clay 的磁盘基线(或这是 Clay 自写事件),旧冲突状态随之解除。
@@ -1788,6 +2015,7 @@
 
     if (!d.dirty) {
       await reloadActiveFromSource(d, raw);
+      if (version !== navigationVersion || d.id !== activeDocId) return;
       return;
     }
 
@@ -1800,9 +2028,10 @@
       cancelId: 0,
     });
     // 用户考虑期间可能已经切到别的标签页;不替已经离开的页面做决定。
-    if (d.id !== activeDocId) return;
+    if (version !== navigationVersion || d.id !== activeDocId) return;
     if (r === 1) {
       await reloadActiveFromSource(d, raw);
+      if (version !== navigationVersion || d.id !== activeDocId) return;
       return;
     }
     d.externalConflict = { missing: false, hash: incomingHash };
@@ -1821,6 +2050,8 @@
         pendingSourceChange = null;
         await applySourceChange(next);
       }
+    } catch (e) {
+      toast(t('status.externalReloadFailed'));
     } finally {
       sourceChangeBusy = false;
     }
@@ -1829,14 +2060,33 @@
   async function syncSourceWatch() {
     const seq = ++sourceWatchSeq;
     const d = docs.find((x) => x.id === activeDocId);
+    const watchedEditor = editor;
+    const watchedNavigation = navigationVersion;
     if (!d || !d.sourcePath || !(window.clay && window.clay.watchSource)) {
-      if (window.clay && window.clay.unwatchSource) await window.clay.unwatchSource();
+      if (window.clay && window.clay.unwatchSource) {
+        try { await window.clay.unwatchSource(); } catch (e) { /* stale watcher cleanup is best effort */ }
+      }
       return;
     }
-    const result = await window.clay.watchSource(d.sourcePath);
-    if (seq !== sourceWatchSeq || d.id !== activeDocId) return;
+    let result;
+    try { result = await window.clay.watchSource(d.sourcePath); }
+    catch (e) {
+      if (seq !== sourceWatchSeq || d.id !== activeDocId || watchedEditor !== editor || watchedNavigation !== navigationVersion) return;
+      queueSourceChange({ path: d.sourcePath, exists: null, error: e && e.message || String(e) });
+      return;
+    }
+    if (seq !== sourceWatchSeq || d.id !== activeDocId || watchedEditor !== editor || watchedNavigation !== navigationVersion) return;
     if (!result || !result.ok) {
       queueSourceChange({ path: d.sourcePath, exists: result && result.exists === false ? false : null, error: result && result.error });
+      return;
+    }
+    // The watch handshake can succeed while the source has already vanished
+    // (the main process still has to watch the parent directory so a later
+    // recreate can be observed).  Do not coerce its absent content into an
+    // external empty-file edit: that would silently replace the canvas with
+    // a blank document and update the wrong source hash.
+    if (result.exists === false) {
+      queueSourceChange({ path: result.path || d.sourcePath, exists: false, error: result.error });
       return;
     }
     // watch 建立时顺便比一次内容,覆盖“Clay 关闭期间被外部工具修改”的场景。
@@ -1847,12 +2097,14 @@
 
   /* 已经开着同一份来源时:内容没变就切过去;
    * 磁盘上变过了就问要不要重新载入(会丢掉 Clay 里的修改,必须让用户选)。 */
-  async function handleDuplicate(existing, raw) {
+  async function handleDuplicate(existing, raw, navigationToken) {
     // 老文档没有 sourceHash;此时是靠内容指纹匹配上的,说明内容本来就一样,
     // 不该拿"指纹缺失"当成"磁盘变过了"去吓唬用户。
     const changed = existing.sourceHash ? existing.sourceHash !== hashOf(raw) : false;
     if (!changed) {
-      activateDoc(existing.id);
+      if (navigationToken !== navigationVersion) return null;
+      const activated = await activateDoc(existing.id);
+      if (!activated) return null;
       toast(t('status.alreadyOpen'));
       return true;
     }
@@ -1864,8 +2116,10 @@
       defaultId: 0,
       cancelId: 0,
     });
+    if (navigationToken !== navigationVersion || !docs.some((d) => d.id === existing.id)) return null;
     if (r !== 1) {
-      activateDoc(existing.id);
+      const activated = await activateDoc(existing.id);
+      if (!activated) return null;
       toast(t('status.switchedExisting'));
       return true;
     }
@@ -1882,10 +2136,15 @@
    * 主场景是「本地已经有 html」,所以点导入直接开系统文件框,
    * 粘贴代码退居次选(通过弹窗)。 */
   async function openFilePicker() {
+    if (!await waitWorkspaceReady(true)) return false;
     if (window.clay && window.clay.openFile) {
-      const f = await window.clay.openFile();
-      if (f) runImport(f.content, f.name.replace(/\.html?$/i, ''), f.path);
-      return;
+      const version = ++navigationVersion;
+      let f;
+      try { f = await window.clay.openFile(); }
+      catch (e) { toast(t('status.fileUnavailable')); return false; }
+      if (version !== navigationVersion) return false;
+      if (f) return runImport(f.content, f.name.replace(/\.html?$/i, ''), f.path);
+      return false;
     }
     // 浏览器里跑(开发预览)没有原生对话框,退回 input
     const input = document.createElement('input');
@@ -1894,7 +2153,12 @@
     input.onchange = () => {
       const file = input.files[0];
       if (!file) return;
-      file.text().then((t) => runImport(t, file.name.replace(/\.html?$/i, ''), ''));
+      const version = navigationVersion;
+      file.text().then((text) => {
+        if (version !== navigationVersion) return false;
+        return runImport(text, file.name.replace(/\.html?$/i, ''), '');
+      })
+        .catch(() => toast(t('status.fileUnavailable')));
     };
     input.click();
   }
@@ -1909,16 +2173,21 @@
   function isFileDrag(e) { return e.dataTransfer && [...e.dataTransfer.types].includes('Files'); }
 
   async function importDroppedFiles(fileList) {
+    if (!await waitWorkspaceReady(true)) return false;
     const files = [...fileList].filter((f) => /\.html?$/i.test(f.name));
-    if (!files.length) { toast(t('status.onlyHtml')); return; }
+    if (!files.length) { toast(t('status.onlyHtml')); return false; }
     // 依次导入,不并发 —— runImport 里可能弹"文件已打开/磁盘变了"确认框,
     // 并发跑会导致好几个确认框同时弹出、互相打架
     for (const f of files) {
+      const version = navigationVersion;
       const p = window.clay.getPathForFile(f);
       if (!p) continue;
-      const got = await window.clay.readPath(p);
+      let got;
+      try { got = await window.clay.readPath(p); } catch (e) { got = null; }
+      if (version !== navigationVersion) return false;
       if (got) await runImport(got.content, got.name.replace(/\.html?$/i, ''), got.path);
     }
+    return true;
   }
 
   // 挂一套拖拽监听到任意 EventTarget(顶层 window 或画布 iframe 的 document 都用这套)
@@ -1978,7 +2247,13 @@
   }
 
   async function runImport(raw, fileName, sourcePath, sampleKey) {
-    if (!raw || !raw.trim()) { toast(t('import.pasteFirst')); return; }
+    if (!await waitWorkspaceReady(true)) return false;
+    // 有源路径时允许 0 字节文件进入空白页面;粘贴/手动导入仍提示先输入内容。
+    if (raw === null || raw === undefined || (typeof raw !== 'string')) { toast(t('import.pasteFirst')); return false; }
+    if (!raw.trim() && !sourcePath) { toast(t('import.pasteFirst')); return false; }
+    const version = ++navigationVersion;
+    await reconcileBeforeBoundary();
+    if (version !== navigationVersion) return false;
 
     // 身份:文件看路径,示例看名字,粘贴看内容指纹
     const sourceKey = sourcePath ? 'file:' + sourcePath
@@ -1994,19 +2269,31 @@
      * 用户复制模板改两个变体是常规操作,不能拦);
      * 只有老文档(没身份)才退回内容指纹。 */
     const existing = docs.find((d) => (d.sourceKey ? d.sourceKey === sourceKey : docSig(d) === sig));
-    if (existing && await handleDuplicate(existing, raw)) {
-      closeModal('#import-modal');
-      $('#import-textarea').value = '';
-      return;
+    if (existing) {
+      const duplicate = await handleDuplicate(existing, raw, version);
+      if (duplicate === null) return false;
+      if (duplicate === true) {
+        closeModal('#import-modal');
+        $('#import-textarea').value = '';
+        return true;
+      }
+      if (version !== navigationVersion) return false;
     }
 
     snapshotActive();
     const tw = window.ClayImporter.detectTailwind(raw);
     const ed = ensureEditor(tw);
+    let result;
     histSuppressed = true;
-    const result = window.ClayImporter.importIntoEditor(ed, raw);
-    ed.UndoManager.clear();   // 导入过程的程序性变更不算历史,用户的第一步从这儿起算
-    histSuppressed = false;
+    try {
+      result = window.ClayImporter.importIntoEditor(ed, raw);
+      ed.UndoManager.clear();   // 导入过程的程序性变更不算历史,用户的第一步从这儿起算
+    } catch (err) {
+      toast(t('status.importFailed', { error: err.message || t('common.unknownError') }));
+      return false;
+    } finally {
+      histSuppressed = false;
+    }
     scheduleHistory();
     docTailwind = result.isTailwind;
 
@@ -2023,11 +2310,18 @@
       dirty: !sourcePath && !sampleKey,
       // 导出时原样还原,不被 Clay 的模板覆盖
       styleText: result.styleText || '',
-      htmlAttrs: result.htmlAttrs || {},
-      bodyAttrs: result.bodyAttrs || {},
+      htmlAttrs: result.rawHtmlAttrs || result.htmlAttrs || {},
+      safeHtmlAttrs: result.safeHtmlAttrs || result.htmlAttrs || {},
+      bodyAttrs: result.rawBodyAttrs || result.bodyAttrs || {},
+      safeBodyAttrs: result.safeBodyAttrs || result.bodyAttrs || {},
       viewport: result.viewport || '',
-      baseHref: result.baseHref || '',
-      headNodes: result.headNodes || [],
+      baseHref: result.rawBaseHref || result.baseHref || '',
+      safeBaseHref: typeof result.safeBaseHref === 'string' ? result.safeBaseHref
+        : (typeof result.baseHref === 'string' ? result.baseHref : ''),
+      headNodes: result.rawHeadNodes || result.headNodes || [],
+      safeHeadNodes: result.safeHeadNodes || result.headNodes || [],
+      rawBodyHtml: result.rawBodyHtml || '',
+      authorActiveAttrs: result.authorActiveAttrs || {},
       bodyScripts: result.bodyScripts || [],
       fidelityVersion: result.fidelityVersion || 1,
       baselineRules: result.baselineRules || {},
@@ -2041,7 +2335,7 @@
     activeDocId = doc.id;
     scheduleCanvasHeal(ed, doc.id);   // 相对路径图片要指回源目录,见函数注释里踩过的坑
     // 会话基线:记下导入时刻的内容签名;粘贴来的天生未保存(baseDirty=true)
-    setSessionMark(doc.id, claySig(ed), !!doc.dirty);
+    setSessionMark(doc.id, claySig(ed, doc), !!doc.dirty);
     if (sourcePath) addRecent(sourcePath, doc.name);   // 有源文件才进"最近编辑"
 
     showCanvas();
@@ -2057,12 +2351,17 @@
     setDevice('desktop');
     persist();
     syncSourceWatch();
+    return true;
   }
 
   /* ── 保存(⌘S)────────────────────────────
    * Word 语义:直接写回源文件。粘贴进来的没有源文件,第一次保存
    * 等于另存为,存完这个文档就"住"进那个文件,以后 ⌘S 直接写。 */
   async function saveToSource() {
+    if (!await waitWorkspaceReady(true)) return false;
+    const token = { id: activeDocId, ed: editor, nav: navigationVersion };
+    await reconcileBeforeBoundary();
+    if (token.id !== activeDocId || token.ed !== editor || token.nav !== navigationVersion) return false;
     if (!editor || !activeDocId) { toast(t('status.nothingToSave')); return false; }
     const d = docs.find((x) => x.id === activeDocId);
     if (!d) return false;
@@ -2079,16 +2378,22 @@
         defaultId: 0,
         cancelId: 0,
       });
+      if (token.id !== activeDocId || token.ed !== editor || token.nav !== navigationVersion) return false;
       if (r !== 1) return false;
     }
 
-    const result = window.ClayExporter.build(editor, d);
-    const r = await window.clay.writeFile(d.sourcePath, result.code);
+    let result;
+    try { result = window.ClayExporter.build(token.ed, d); }
+    catch (err) { toast(t('status.saveFailed', { error: err.message || t('common.unknownError') })); return false; }
+    let r;
+    try { r = await window.clay.writeFile(d.sourcePath, result.code); }
+    catch (err) { toast(t('status.saveFailed', { error: err.message || t('common.unknownError') })); return false; }
+    if (token.id !== activeDocId || token.ed !== editor || token.nav !== navigationVersion) return false;
     if (!r || !r.ok) { toast(t('status.saveFailed', { error: (r && r.error) || t('common.unknownError') })); return false; }
     d.dirty = false;
     d.sourceHash = hashOf(result.code);   // 磁盘上现在就是这份,别再误报"文件在磁盘上变了"
     delete d.externalConflict;
-    setSessionMark(d.id, claySig(editor), false);   // 保存基线:此后签名一致即干净
+    setSessionMark(d.id, claySig(editor, d), false);   // 保存基线:此后签名一致即干净
     renderTabs();
     persist();
     syncSourceWatch();   // 文件若曾被删除,本次保存重建后要重新接上目录监听
@@ -2100,10 +2405,16 @@
    * 源文件不动。默认名去掉已有的 -clay 再补一个,不然 A-clay 再另存
    * 会滚雪球成 A-clay-clay。存完按 Word 语义换住处:手上打开的就是新文件。 */
   async function saveAsCopy() {
+    if (!await waitWorkspaceReady(true)) return false;
+    const token = { id: activeDocId, ed: editor, nav: navigationVersion };
+    await reconcileBeforeBoundary();
+    if (token.id !== activeDocId || token.ed !== editor || token.nav !== navigationVersion) return false;
     if (!editor || !activeDocId) { toast(t('status.nothingToSave')); return false; }
     const d = docs.find((x) => x.id === activeDocId);
     if (!d) return false;
-    const result = window.ClayExporter.build(editor, d);
+    let result;
+    try { result = window.ClayExporter.build(token.ed, d); }
+    catch (err) { toast(t('status.saveFailed', { error: err.message || t('common.unknownError') })); return false; }
     const base = (d.sourcePath
       ? d.sourcePath.split('/').pop().replace(/\.html?$/i, '')
       : (d.name || 'page'))
@@ -2111,7 +2422,10 @@
     const fname = base + '-clay.html';
 
     if (window.clay && window.clay.saveFile) {
-      const p = await window.clay.saveFile(fname, result.code, d.sourcePath || '');
+      let p;
+      try { p = await window.clay.saveFile(fname, result.code, d.sourcePath || ''); }
+      catch (err) { toast(t('status.saveFailed', { error: err.message || t('common.unknownError') })); return false; }
+      if (token.id !== activeDocId || token.ed !== editor || token.nav !== navigationVersion) return false;
       if (!p) return false;   // 用户取消了保存框
       d.sourcePath = p;
       d.sourceKey = 'file:' + p;
@@ -2119,8 +2433,11 @@
       d.sourceHash = hashOf(result.code);
       d.dirty = false;
       delete d.externalConflict;
-      setSessionMark(d.id, claySig(editor), false);   // 保存基线:此后签名一致即干净
+      setSessionMark(d.id, claySig(editor, d), false);   // 保存基线:此后签名一致即干净
       addRecent(p, d.name);   // 另存为的新文件也进"最近编辑"
+      // 新文件可能已经换了目录:画布 iframe 的相对资源基准也要随之换到
+      // 新源路径，否则另存为后仍显示旧目录里的图片/字体。
+      scheduleCanvasHeal(editor, d.id);
       renderTabs();
       persist();
       syncSourceWatch();
@@ -2163,32 +2480,72 @@
     return 900;
   }
 
+  async function buildPdfWhenReady(ed, d, token) {
+    let result = null;
+    // Tailwind's local compiler runs inside the canvas. Give it a bounded,
+    // identity-checked window to publish compiled CSS, never fall back to a
+    // script-bearing PDF snapshot.
+    for (let attempt = 0; attempt < 8; attempt++) {
+      if (token.id !== activeDocId || token.ed !== editor || token.nav !== navigationVersion) return null;
+      result = window.ClayExporter.buildForPdf(ed, d);
+      if (result && result.ok) return result;
+      if (!result || result.error !== 'tailwind-not-ready') return result;
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+    return result || { ok: false, ready: false, error: 'tailwind-not-ready' };
+  }
+
   async function exportPdf() {
+    if (!await waitWorkspaceReady(true)) return false;
+    const token = { id: activeDocId, ed: editor, nav: navigationVersion };
+    await reconcileBeforeBoundary();
+    if (token.id !== activeDocId || token.ed !== editor || token.nav !== navigationVersion) return false;
     if (!editor || !activeDocId) { toast(t('status.nothingToExport')); return; }
     const d = docs.find((x) => x.id === activeDocId);
     if (!d) return;
-    if (!(window.clay && window.clay.exportPdf)) { toast(t('status.pdfDesktopOnly')); return; }
-    const result = window.ClayExporter.build(editor, d);
+    if (!(window.clay && window.clay.exportPdf)) { toast(t('status.pdfDesktopOnly')); return false; }
+    let result;
+    try { result = await buildPdfWhenReady(token.ed, d, token); }
+    catch (err) { toast(t('status.pdfFailed', { error: err.message || t('common.unknownError') })); return false; }
+    if (token.id !== activeDocId || token.ed !== editor || token.nav !== navigationVersion) return false;
+    if (!result || !result.ok) {
+      toast(t(result && result.error === 'tailwind-not-ready' ? 'status.pdfNotReady' : 'status.pdfFailed', { error: result && result.error || t('common.unknownError') }));
+      return false;
+    }
     const base = (d.name || 'page').replace(/[\/\\:*?"<>|]/g, '-').replace(/(-clay)+$/i, '').slice(0, 40);
     toast(t('status.pdfGenerating'));
     // 相对路径图片(素材文件夹场景)要指回源目录 —— PDF 渲染用的临时文件不和原文件同目录,
     // 跟画布里那个问题是同一类,这里传源路径给主进程去插 base 修
-    const r = await window.clay.exportPdf(base + '.pdf', result.code,
-      currentExportWidth(), currentExportHeight(), d.sourcePath || '');
-    if (!r) return;                                   // 用户取消了保存框
-    if (!r.ok) { toast(t('status.pdfFailed', { error: r.error || t('common.unknownError') })); return; }
+    let r;
+    try {
+      r = await window.clay.exportPdf(base + '.pdf', result.code,
+        currentExportWidth(), currentExportHeight(), d.sourcePath || '');
+    } catch (err) { toast(t('status.pdfFailed', { error: err.message || t('common.unknownError') })); return false; }
+    if (token.id !== activeDocId || token.ed !== editor || token.nav !== navigationVersion) return false;
+    if (!r) return false;                                   // 用户取消了保存框
+    if (!r.ok) { toast(t('status.pdfFailed', { error: r.error || t('common.unknownError') })); return false; }
     toast(t('status.pdfDone', { file: r.path.split('/').pop() }));
+    return true;
   }
 
   /* 给开发的交接通道:整页代码进剪贴板。代码从主流程里退场,
    * 不再把一屏源码怼到不看代码的人脸上。 */
   async function copyCode() {
+    if (!await waitWorkspaceReady(true)) return false;
+    const token = { id: activeDocId, ed: editor, nav: navigationVersion };
+    await reconcileBeforeBoundary();
+    if (token.id !== activeDocId || token.ed !== editor || token.nav !== navigationVersion) return false;
     if (!editor || !activeDocId) { toast(t('status.nothingToCopy')); return; }
     const d = docs.find((x) => x.id === activeDocId);
     if (!d) return;
-    const result = window.ClayExporter.build(editor, d);
-    await navigator.clipboard.writeText(result.code);
+    let result;
+    try { result = window.ClayExporter.build(token.ed, d); }
+    catch (err) { toast(t('status.copyFailed', { error: err.message || t('common.unknownError') })); return false; }
+    try { await navigator.clipboard.writeText(result.code); }
+    catch (err) { toast(t('status.copyFailed', { error: err.message || t('common.unknownError') })); return false; }
+    if (token.id !== activeDocId || token.ed !== editor || token.nav !== navigationVersion) return false;
     toast(t('status.codeCopied'));
+    return true;
   }
 
   /* 一个撤销动作是不是"有意义的编辑"。
@@ -2216,30 +2573,33 @@
     return g.actions.some(isMeaningfulAction);
   }
 
-  /* 内容签名:页面 HTML(模型序列化,确定性)+ 用户改动出的 #id 规则(去重排序)。
-   * 脏与否不再解读撤销栈里动作的形状 —— 那些内部模型(规则/选择器/组件绑定)的
-   * 结构和时序反复变化,按形状分类已连续误判两次。签名对比语义上无可争议:
-   *  - 占位空规则没有样式,天然不进签名 → 纯选中不脏
-   *  - 任何真实编辑(样式/文字/结构,不论产生什么栈形状)都会改变签名 → 必然识别
-   *  - 撤销回到保存点签名复原 → 圆点自动消失
-   * 规则去重 + 排序,是为了容忍底座在选中往返时对规则集的重复/换序噪音。 */
-  function claySig(ed) {
-    const CLAY_ID = /#i[a-z0-9]{3,}/;
-    const parts = [];
+  /* 内容签名:页面 HTML(模型序列化,确定性)+ exporter 同一套“当前规则相对
+   * 导入基线的差异”。旧实现只收集 #iXXX 规则,会漏掉作者原本就带 id/class
+   * 的选择器；还把 CSS 值 lower-case,会把大小写敏感的自定义属性/URL 错当成
+   * 同一份内容。extractClayRules 已经负责跳过基线规则和空占位规则,这里直接
+   * 复用它，保证“脏判断”和“导出结果”对同一条 CSS 的理解一致。 */
+  function claySig(ed, doc) {
+    let rules = '';
     try {
-      ed.Css.getRules().forEach((rule) => {
-        const sel = rule.selectorsToString ? rule.selectorsToString() : '';
-        if (!sel || !CLAY_ID.test(sel)) return;
-        const styleText = (rule.styleToString ? rule.styleToString() : '').trim();
-        if (!styleText) return;   // 空占位规则不算内容
-        parts.push(sel + '{' + styleText.toLowerCase().replace(/\s+/g, '') + '}@' + (rule.get('mediaText') || ''));
-      });
+      if (window.ClayExporter && typeof window.ClayExporter.extractClayRules === 'function') {
+        rules = window.ClayExporter.extractClayRules(ed, doc && doc.baselineRules);
+      } else {
+        // 极老/测试注入环境没有 exporter 时仍保留旧工作区的 #iXXX 兜底。
+        const CLAY_ID = /#i[a-z0-9]{3,}/;
+        const parts = [];
+        ed.Css.getRules().forEach((rule) => {
+          const sel = rule.selectorsToString ? rule.selectorsToString() : '';
+          const styleText = (rule.styleToString ? rule.styleToString() : '').trim();
+          if (!sel || !styleText || !CLAY_ID.test(sel)) return;
+          parts.push(sel + '{' + styleText.replace(/\s+/g, ' ').trim() + '}@' + (rule.get('mediaText') || ''));
+        });
+        rules = [...new Set(parts)].sort().join('\n');
+      }
     } catch (e) { /* 读不了就只按 HTML 算 */ }
-    const rules = [...new Set(parts)].sort().join('\n');
     // 选中元素时底座会往元素上写 id="iXXX"(为规则占位)——这是内部记账不是用户编辑,
-    // 从签名里归一化掉,否则"点一下"就会因 HTML 多了个 id 而误判为改过。
+    // 从 HTML 签名里归一化掉,否则“点一下”就会因多了个 id 而误判为改过。
     const html = ed.getHtml().replace(/ id="i[a-z0-9]{2,}"/g, '');
-    return hashOf(html + '␟' + rules);
+    return hashOf(html + '␟' + String(rules || '').replace(/\s+/g, ' ').trim());
   }
 
   /* 每个文档在本次会话里的"保存基线":上次存盘(或打开)那一刻的内容签名。
@@ -2251,20 +2611,30 @@
 
   // 编辑/撤销/重做后统一收口:重画历史 + 按"当前签名 vs 保存基线"重算脏(可标脏也可清脏)
   let reconcileTimer = null;
+  let reconcileVersion = 0;
   function scheduleEditReconcile() {
     clearTimeout(reconcileTimer);
+    const docId = activeDocId;
+    const targetEditor = editor;
+    const version = ++reconcileVersion;
     reconcileTimer = setTimeout(() => {
+      reconcileTimer = null;
+      // 防抖任务属于“产生它的文档/编辑器实例”。切页或重建编辑器后，
+      // 旧任务不能拿新页面去算脏状态。
+      if (version !== reconcileVersion || docId !== activeDocId || targetEditor !== editor) return;
       scheduleHistory();
-      reconcileActiveDirtyNow();
+      reconcileActiveDirtyNow(docId, targetEditor);
     }, 140);
   }
 
-  function reconcileActiveDirtyNow() {
-    const d = docs.find((x) => x.id === activeDocId);
-    if (!d || !editor) return;
-    const m = sessionMark[activeDocId];
+  function reconcileActiveDirtyNow(docId, targetEditor) {
+    const id = docId === undefined ? activeDocId : docId;
+    const ed = targetEditor === undefined ? editor : targetEditor;
+    const d = docs.find((x) => x.id === id);
+    if (!d || !ed) return;
+    const m = sessionMark[id];
     if (!m) return;   // 基线未建立(理论上不会:导入/切换/保存都会建),保持现状
-    const next = m.baseDirty || claySig(editor) !== m.sig;
+    const next = m.baseDirty || claySig(ed, d) !== m.sig;
     if (next !== !!d.dirty) {
       d.dirty = next;
       renderTabs();
@@ -2291,19 +2661,35 @@
     renderHistory();
   }
 
+  /* 所有会离开当前编辑上下文的动作都经过这里。顺序很重要:
+   * 先 flush RTE → 清掉旧防抖并递增版本 → 立即按当前页重算 dirty。
+   * 这样最后一段文字、作者选择器的 CSS 改动都能在保存/导出/切页/关闭前
+   * 进入模型，并且旧页的延迟任务不会污染新页。 */
+  async function reconcileBeforeBoundary() {
+    await flushActiveTextEditing();
+    clearTimeout(reconcileTimer);
+    reconcileTimer = null;
+    reconcileVersion++;
+    reconcileActiveDirtyNow(activeDocId, editor);
+  }
+
   async function handleCloseRequest() {
     if (closePromptBusy || !(window.clay && window.clay.respondToClose)) return;
     closePromptBusy = true;
     try {
-      // 用户可能刚输入完就点系统菜单;先把仍在光标里的文字提交到模型和历史。
-      await flushActiveTextEditing();
-      // 140ms 的防抖也可能还没来得及标脏;退出前必须同步算一次。
-      clearTimeout(reconcileTimer);
-      reconcileActiveDirtyNow();
+      if (!await waitWorkspaceReady(true)) { window.clay.respondToClose(false); return; }
+      const requestToken = { nav: navigationVersion, ed: editor, active: activeDocId };
+      // 用户可能刚输入完就点系统菜单;先把仍在光标里的文字提交到模型和历史,
+      // 再同步收口当前文档的脏状态。
+      await reconcileBeforeBoundary();
+      if (requestToken.nav !== navigationVersion || requestToken.ed !== editor || requestToken.active !== activeDocId) {
+        window.clay.respondToClose(false);
+        return;
+      }
       snapshotActive();
       const dirtyIds = docs.filter((d) => d.dirty).map((d) => d.id);
       if (!dirtyIds.length) {
-        window.clay.respondToClose(commitClosedWorkspace());
+        window.clay.respondToClose(await commitClosedWorkspaceSafely(requestToken));
         return;
       }
 
@@ -2322,27 +2708,46 @@
         cancelId: 2,
       });
 
+      if (requestToken.nav !== navigationVersion || requestToken.ed !== editor || requestToken.active !== activeDocId) {
+        window.clay.respondToClose(false);
+        return;
+      }
+
       if (response === 2) {
         window.clay.respondToClose(false);
         return;
       }
       if (response === 1) {
-        window.clay.respondToClose(commitClosedWorkspace());
+        window.clay.respondToClose(await commitClosedWorkspaceSafely(requestToken));
         return;
       }
 
       for (const id of dirtyIds) {
         const d = docs.find((x) => x.id === id);
         if (!d || !d.dirty) continue;
-        if (id !== activeDocId) activateDoc(id);
+        if (id !== activeDocId) {
+          const activated = await activateDoc(id);
+          if (!activated) { window.clay.respondToClose(false); return; }
+          requestToken.nav = navigationVersion;
+          requestToken.ed = editor;
+          requestToken.active = activeDocId;
+        }
+        if (id !== activeDocId) {
+          window.clay.respondToClose(false);
+          return;
+        }
         const saved = await (d.sourcePath ? saveToSource() : saveAsCopy());
         if (!saved) {
           window.clay.respondToClose(false);
           return;
         }
+        if (id !== activeDocId || requestToken.active !== activeDocId || requestToken.nav !== navigationVersion) {
+          window.clay.respondToClose(false);
+          return;
+        }
       }
       snapshotActive();
-      window.clay.respondToClose(commitClosedWorkspace());
+      window.clay.respondToClose(await commitClosedWorkspaceSafely(requestToken));
     } catch (err) {
       toast(t('status.closeSaveFailed'));
       window.clay.respondToClose(false);
@@ -2695,12 +3100,15 @@
   }
 
   // 调试句柄(自动化验证用,和 __clayEditor 一个性质):不参与任何用户路径
-  window.__clay = { runImport, getDocs: () => docs, getRecents: () => recents, getActiveDocId: () => activeDocId, saveToSource, saveAsCopy, exportPdf, copyCode, closeDoc, jumpHistory, renderHistory, renderHome, openRecent };
+  window.__clay = { runImport, getDocs: () => docs, getRecents: () => recents, getActiveDocId: () => activeDocId, getWorkspaceState: () => ({ status: workspaceStatus, writable: workspaceWritable, restored }), saveToSource, saveAsCopy, exportPdf, copyCode, closeDoc, activateDoc, goHome, jumpHistory, renderHistory, renderHome, openRecent };
 
   // 样式面板和 GrapesJS 内部标签只在初始化时生成。切换语言前先落盘当前画布，
   // 再轻量重载渲染层，让所有静态与动态文案一次性使用同一语言。
   window.addEventListener('clay:locale-change', async (event) => {
-    if (restored) await persist();
+    if (restored) {
+      await reconcileBeforeBoundary();
+      await persist();
+    }
     if (window.clay && window.clay.reloadForLocale) window.clay.reloadForLocale(event.detail.locale);
     else location.reload();
   });
@@ -2714,11 +3122,16 @@
   refreshSelectionUI();
   // 冷启动是空工作区:先收起面板;restoreWorkspace 会渲染主页(有最近记录则显示,否则手绘引导)
   $('#sidebar').hidden = true;
-  requestAnimationFrame(renderHome);
-  restoreWorkspace();
+  requestAnimationFrame(() => renderHome());
+  restoreWorkspace().catch((err) => {
+    restored = false;
+    workspaceWritable = false;
+    toast(t('status.workspaceReadFailed'));
+    finishWorkspaceReady('error', false);
+  });
   // 关窗时 async IPC 来不及往返,这里同步落一份(桌面端由主进程 sendSync 兜底)
   window.addEventListener('beforeunload', () => {
-    if (!restored) return;   // 还没读完磁盘就关窗 → 什么都别写,否则会用空数据覆盖存档
+    if (!restored || !workspaceWritable) return;   // 还没读完/读失败只读 → 什么都别写
     if (cleanExitCommitted) return;   // 正常退出的空会话已同步写好,绝不能再拿旧 docs 覆盖回来
     clearTimeout(persistTimer);
     snapshotActive();
