@@ -1238,6 +1238,15 @@
   /* 双击图片 → 选本地文件替换(接管默认的素材库弹窗)
    * 大图先压缩再嵌入:2MB 原图直接 base64 会把 HTML 撑到 2.7MB */
   function compressImage(file, cb) {
+    // 动图(GIF)和矢量图(SVG)过 canvas 会变成静态位图/丢失透明底,SVG 没有固有尺寸时
+    // 甚至会得到 0×0 画布;这两类原样嵌入,不做重编码。
+    if (file.type === 'image/gif' || file.type === 'image/svg+xml') {
+      const raw = new FileReader();
+      raw.onload = () => cb(raw.result, false);
+      raw.onerror = () => toast(t('status.imageReadFailed'));
+      raw.readAsDataURL(file);
+      return;
+    }
     const url = URL.createObjectURL(file);
     const img = new Image();
     img.onload = () => {
@@ -1256,9 +1265,9 @@
       cv.width = Math.round(img.width * scale);
       cv.height = Math.round(img.height * scale);
       cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
-      // PNG 可能带透明,保持 PNG;其余转 JPEG 压质量
-      const isPng = file.type === 'image/png';
-      cb(cv.toDataURL(isPng ? 'image/png' : 'image/jpeg', 0.85), true);
+      // PNG/WebP 可能带透明,保持原格式(转 JPEG 会把透明底变黑);其余转 JPEG 压质量
+      const outType = file.type === 'image/png' || file.type === 'image/webp' ? file.type : 'image/jpeg';
+      cb(cv.toDataURL(outType, 0.85), true);
     };
     img.onerror = () => { URL.revokeObjectURL(url); toast(t('status.imageReadFailed')); };
     img.src = url;
@@ -1619,7 +1628,8 @@
     // 没打开页面时属性面板是空的,收起来把画布让出来
     $('#sidebar').hidden = true;
     // 主页没有页面可跟随,回到用户自己的偏好
-    applyTheme(localStorage.getItem('clay-theme') !== 'dark');
+    // 默认值必须和启动时一致(无偏好 = 深色),否则首次“开页面 → 回主页”会莫名变浅色
+    applyTheme(localStorage.getItem('clay-theme') === 'light');
     refreshSelectionUI();
     renderTabs();
     await renderHome(version);
