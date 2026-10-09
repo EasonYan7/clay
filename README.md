@@ -1,250 +1,215 @@
-# Clay
-
 <p align="center">
-  <a href="./README.zh-CN.md"><img src="https://img.shields.io/badge/简体中文-阅读中文版-EDEDF0?style=for-the-badge&amp;labelColor=26262B" alt="简体中文" /></a>
-  <a href="./README.md"><img src="https://img.shields.io/badge/English-Current_language-6D4AFF?style=for-the-badge" alt="English" /></a>
+  <img src="docs/readme/hero-en.png" alt="Clay — finish what AI started. Open AI-generated HTML as a visual canvas." width="100%" />
 </p>
 
 <p align="center">
-  <strong>Turn AI-generated HTML into an editable visual canvas.</strong><br />
-  Open a page, adjust it directly, and export clean code—without learning CSS first.
+  <b>English</b>&nbsp;&nbsp;·&nbsp;&nbsp;<a href="./README.zh-CN.md">简体中文</a>
 </p>
 
 <p align="center">
-  <img alt="macOS" src="https://img.shields.io/badge/macOS-Supported-111111?style=flat-square&amp;logo=apple" />
-  <img alt="Electron 43" src="https://img.shields.io/badge/Electron-43-47848F?style=flat-square&amp;logo=electron&amp;logoColor=white" />
-  <img alt="Local first" src="https://img.shields.io/badge/Local--first-No_account-6D4AFF?style=flat-square" />
-  <img alt="Languages" src="https://img.shields.io/badge/UI-中文%20%7C%20English-2EA44F?style=flat-square" />
-  <a href="./LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/License-MIT-F4B942?style=flat-square" /></a>
+  <a href="https://github.com/EasonYan7/clay/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/EasonYan7/clay?style=flat-square&label=release&color=7c5cff&labelColor=18181b" /></a>
+  <img alt="macOS 12+" src="https://img.shields.io/badge/macOS-12%2B-18181b?style=flat-square&logo=apple&logoColor=white" />
+  <img alt="Local-first" src="https://img.shields.io/badge/local--first-no%20account-18181b?style=flat-square" />
+  <a href="./LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/license-MIT-18181b?style=flat-square" /></a>
 </p>
 
 <p align="center">
-  <img src="docs/screenshots/editor.png" width="880" alt="Clay visual HTML editor" />
+  <a href="#install">Install</a>&nbsp;&nbsp;·&nbsp;&nbsp;<a href="#see-it-in-action">Demo</a>&nbsp;&nbsp;·&nbsp;&nbsp;<a href="#features">Features</a>&nbsp;&nbsp;·&nbsp;&nbsp;<a href="#faq">FAQ</a>&nbsp;&nbsp;·&nbsp;&nbsp;<a href="#development">Development</a>
 </p>
 
-> [!NOTE]
-> Clay is currently an early preview for macOS. Signed installers are not available yet, but you can run it from source using the steps below.
+<br />
 
-## Why Clay?
+AI gets a page most of the way there. The last stretch — one sentence, a button color, a layout that breaks on mobile — usually means prompting again and hoping nothing else moves.
 
-AI can generate a page in seconds, but the first output is rarely the last. Changing one sentence, moving a card, or fixing a mobile layout often means prompting again and risking unexpected changes elsewhere.
+**Clay opens that HTML as a visual canvas.** Click what you want to change, change it, check it on every screen size, and save it back. Your original markup, styles, and scripts stay intact.
 
-Clay makes that iteration direct. Open an existing HTML file as a visual canvas, select and move elements, preview the result, then save it back or export HTML that a developer can continue working with.
-
-### Clay is for you if you want to
-
-- Change copy, images, colors, type, and spacing in an AI-generated page
-- Rearrange cards and sections without writing CSS
-- Check responsive layouts at desktop, tablet, and mobile sizes
-- Preserve the existing HTML and CSS instead of regenerating the whole page
-- Hand off one editable file across design, product, marketing, and engineering
-
-## One edit in three steps
-
-1. **Open** a local HTML file or paste HTML source.
-2. **Edit** content and styles on the canvas, then drag elements into place.
-3. **Deliver** by saving the source, creating a copy, or exporting a PDF.
-
-<table>
-<tr>
-<td width="50%">
-<img src="docs/screenshots/home.png" alt="Clay home screen" />
-<p align="center"><sub>Open a file or paste code, with recent projects ready to revisit</sub></p>
-</td>
-<td width="50%">
-<img src="docs/screenshots/history.png" alt="Clay edit history" />
-<p align="center"><sub>Readable edit history with jump-to-state navigation</sub></p>
-</td>
-</tr>
-</table>
-
-<p align="center">
-  <img src="docs/screenshots/mobile.png" width="420" alt="Clay mobile preview" />
-  <br /><sub>Inspect responsive behavior in the mobile preview</sub>
-</p>
-
-## What you can do
-
-| Capability | What it means for you |
-| --- | --- |
-| Open existing HTML | Use a local file or pasted source—Clay is not tied to a particular generator |
-| Semantic layers | Work with recognizable headers, navigation, and cards instead of anonymous `div` nodes |
-| Visual styling | Adjust typography, color, borders, radius, shadows, spacing, and layout |
-| Direct editing | Double-click text to edit it and double-click an image to replace it |
-| Structural drag and drop | Move elements while preserving normal document flow |
-| Responsive previews | Switch between desktop, tablet, and mobile views |
-| Edit history | Read each change in plain language and return to an earlier state |
-| External file sync | Refresh when another app changes the source, with conflict protection |
-| Fidelity-focused export | Preserve original CSS, structure, and scripts while keeping Clay changes separate |
-| Bilingual interface | Use Simplified Chinese or English across the app and macOS menus |
-
-## Local-first by design
-
-Clay does not require an account and does not intentionally upload the HTML you open. File access, edit history, and saving happen on your Mac.
-
-If the original page references remote fonts, images, styles, or scripts, previewing those resources may still contact their original hosts. Tailwind Play CDN pages may also need network access while being previewed.
-
-## Quick start
-
-### Install with Homebrew
-
-Requires Homebrew 7 or later (run `brew update` first). Homebrew only loads casks from third-party taps after you trust them:
+## Install
 
 ```bash
 brew tap EasonYan7/clay
-```
-
-```bash
 brew trust --tap EasonYan7/clay
-```
-
-```bash
 brew install --cask clay
 ```
 
-Upgrade with `brew upgrade --cask clay`, or uninstall with `brew uninstall --cask clay` (add `--zap` to also remove app data).
+Requires macOS 12+ and Homebrew 7+. Prefer a disk image? Download the DMG for [Apple silicon or Intel](https://github.com/EasonYan7/clay/releases/latest).
 
-You can also download the DMG from [GitHub Releases](https://github.com/EasonYan7/clay/releases): `Clay-<version>-arm64.dmg` for Apple Silicon, or `Clay-<version>-x64.dmg` for Intel.
+<details>
+<summary><b>About the unsigned build</b></summary>
+<br />
 
-Clay is not yet signed with an Apple Developer ID or notarized. The Homebrew cask removes the macOS quarantine flag after installation, so Homebrew installs open normally. If you install from the DMG, Gatekeeper may block the first launch. To open it, go to System Settings → Privacy & Security and click "Open Anyway", or run:
+Clay is not yet signed with an Apple Developer ID or notarized. The Homebrew cask clears the macOS quarantine flag after install, so it opens normally. If you install from the DMG, Gatekeeper may block the first launch — allow it under **System Settings → Privacy & Security → Open Anyway**, or run:
 
 ```bash
 xattr -dr com.apple.quarantine /Applications/Clay.app
 ```
 
-### Requirements for running from source
+Upgrade with `brew upgrade --cask clay`. Uninstall with `brew uninstall --cask clay` (add `--zap` to remove app data too).
 
-- macOS
-- Node.js >= 22.12.0 and npm
-- Git for cloning the repository
+</details>
 
-### Run from source
+## See it in action
+
+<p align="center">
+  <img src="docs/readme/demo-en.gif" alt="Selecting a heading, retyping it, restyling a button, previewing tablet and phone layouts, and opening the edit history in Clay" width="100%" />
+  <br />
+  <sub>Select → retype → restyle → check tablet and phone → review history. Recorded from the app itself.</sub>
+</p>
+
+## Features
+
+### Edit the page, not the prompt
+
+Click any element to select it. Double-click text to retype it, double-click an image to replace it, and drag to rearrange. The Style panel covers typography, color, spacing, borders, and layout — no CSS required.
+
+<img src="docs/readme/editor-en.png" alt="Clay editor with a heading selected and the Style panel open" width="100%" />
+
+### Check every screen
+
+Switch between desktop, tablet, and phone widths in one click, and fix what breaks where it breaks.
+
+<img src="docs/readme/responsive.png" alt="The same page rendered at desktop, tablet, and phone widths" width="100%" />
+
+### Every change, in plain language
+
+History reads like a changelog — “Adjust Button: radius”, not a stack of opaque undo steps — and any entry takes you back to that exact state.
+
+<img src="docs/readme/history-en.png" alt="Clay History panel listing each edit in plain language" width="100%" />
+
+### Start in seconds
+
+Open a local file, paste HTML from v0, Bolt, Lovable, or anywhere else — or try one of the built-in samples.
+
+<img src="docs/readme/home-en.png" alt="Clay home screen with open, paste, and sample options" width="100%" />
+
+### And also
+
+| | |
+| --- | --- |
+| **Semantic layers** | Headers, navigation, and cards are named for what they are, not as anonymous `div`s |
+| **Fidelity-first export** | Original CSS, structure, and scripts are preserved; Clay's changes are written separately |
+| **External file sync** | When another app edits the source, Clay refreshes — and asks before overwriting anything |
+| **Tailwind-aware** | Common Tailwind pages are recognized and converted to styles that work offline |
+| **PDF export** | Turn the finished page into a PDF in one click |
+| **Bilingual** | English and Simplified Chinese across the app, dialogs, and macOS menus |
+
+## Local-first
+
+No account required. Clay reads, edits, and saves files on your Mac, and does not upload the HTML you open.
+
+If a page references remote fonts, images, styles, or scripts, previewing it may still contact those hosts — just as a browser would. Pages using the Tailwind Play CDN may need network access while previewing.
+
+## Status
+
+| | |
+| --- | --- |
+| macOS 12+ | ✅ Supported |
+| Local HTML files · pasted source | ✅ Supported |
+| HTML · PDF export | ✅ Supported |
+| Import from a URL | ⏳ Not yet |
+| Windows · Linux | ⏳ Not yet adapted or verified |
+| Signed and notarized builds | ⏳ Not yet |
+
+## FAQ
+
+<details>
+<summary><b>Will Clay rewrite all of my code?</b></summary>
+<br />
+Clay preserves the original HTML, CSS, and scripts, and writes canvas changes separately in the exported result. For complex pages, keep a copy of the source and check the export in a browser.
+</details>
+
+<details>
+<summary><b>Can Clay edit Tailwind pages?</b></summary>
+<br />
+Yes. Clay recognizes common Tailwind pages and produces static styles that work offline. Configurations with functions, plugins, or runtime logic may not convert completely.
+</details>
+
+<details>
+<summary><b>Why is some dynamic content missing?</b></summary>
+<br />
+For safety and predictability, the canvas does not run arbitrary page scripts. Content that JavaScript generates at runtime may need to be converted to static HTML before editing. Scripts are held aside and restored on export.
+</details>
+
+<details>
+<summary><b>Can I use Clay on Windows or Linux?</b></summary>
+<br />
+Not yet. Clay is developed and tested on macOS. Its foundation is cross-platform, but Windows and Linux still need packaging, adaptation, and regression testing.
+</details>
+
+## Development
+
+Requires Node.js 22.12+ and npm.
 
 ```bash
 git clone https://github.com/EasonYan7/clay.git
 cd clay/app
 npm install
-npm test
-npm start
+npm start          # run the app
+npm test           # static checks + the full Electron suite
+npm run dist       # build Clay-<version>-arm64.dmg and -x64.dmg into app/dist/
 ```
 
-Once Clay opens, choose “Open HTML File” or drag a `.html` file into the window.
+<details>
+<summary><b>Test suites</b></summary>
+<br />
 
-### Build the macOS app
-
-```bash
-cd app
-npm run dist
-```
-
-Build artifacts are written to `app/dist/` as `Clay-<version>-arm64.dmg` (Apple Silicon) and `Clay-<version>-x64.dmg` (Intel). They are not currently code-signed or notarized, so macOS may block them from opening normally.
-
-## Current support
-
-| Area | Status |
+| Command | Covers |
 | --- | --- |
-| macOS | ✅ Supported |
-| Windows / Linux | ⏳ Not adapted or verified yet |
-| Local HTML files | ✅ Supported |
-| Pasted HTML source | ✅ Supported |
-| Import from a URL | ⏳ Not supported yet |
-| HTML / PDF export | ✅ Supported |
-| Signed installer | ⏳ Not available yet |
+| `npm run test:editor` | Editing, history, drag and drop, save, and exit behavior |
+| `npm run test:fidelity` | Import, canvas rendering, and exported output |
+| `npm run test:i18n` | Chinese and English UI, dynamic copy, and dialogs |
+| `npm run test:renderer-state` | Editor state, rich-text flush, CSS dirty state, navigation races |
+| `npm run test:main-process` | PDF script isolation, page-height limits, path capabilities, workspace recovery |
+| `npm run test:production` | The real `electron .` app: preload bridge, file checks, save, recovery, PDF, clean exit |
 
-## FAQ
+CI runs the GUI suites on macOS and a behavioral subset under Xvfb on Linux. Pushing a `v*` tag builds both DMGs, publishes a GitHub Release, and updates the [Homebrew tap](https://github.com/EasonYan7/homebrew-clay).
 
-<details>
-<summary><strong>Will Clay rewrite all of my code?</strong></summary>
-<br />
-Clay tries to preserve the original HTML, CSS, and scripts, and writes canvas changes separately in the exported result. For complex pages, keep a copy of the source and verify the export in a browser.
 </details>
 
 <details>
-<summary><strong>Can Clay edit Tailwind pages?</strong></summary>
-<br />
-Yes. Clay recognizes common Tailwind pages and tries to produce static styles that work offline. Complex configurations containing functions, plugins, or runtime logic may not be fully converted.
-</details>
-
-<details>
-<summary><strong>Why is some dynamic content missing?</strong></summary>
-<br />
-For safety and predictability, the canvas does not execute arbitrary application scripts. Content generated by JavaScript at runtime may need to be converted to static HTML before editing.
-</details>
-
-<details>
-<summary><strong>Can I use Clay on Windows?</strong></summary>
-<br />
-Clay is currently developed and tested only on macOS. Its foundation is cross-platform, but Windows and Linux still need packaging, adaptation, and regression testing.
-</details>
-
-## Development and tests
-
-```bash
-cd app
-npm test
-npm run test:editor
-npm run test:fidelity
-npm run test:i18n
-npm run test:renderer-state
-npm run test:main-process
-npm run test:production
-```
-
-- `npm test` runs static checks and the complete Electron suite.
-- `test:production` starts the real `electron .` app and exercises the main process, preload bridge, file capability checks, save, workspace recovery, PDF, and clean exit.
-- `test:renderer-state` covers editor state, RTE flush, CSS dirty state, and navigation regressions.
-- `test:main-process` covers PDF script isolation, page-height rejection, path capabilities, and workspace backup recovery.
-- `test:fidelity` covers import, canvas rendering, and exported output
-- `test:i18n` covers Chinese and English UI, dynamic copy, and dialogs
-
-For CI, the GUI suites run on macOS and under Xvfb on Linux; the Linux job is a
-behavioral check and does not replace macOS window-manager or Metal validation.
-
-<details>
-<summary><strong>View the project structure</strong></summary>
+<summary><b>Project structure</b></summary>
 
 ```text
 app/
-  main.js              # Electron main process, files, menus, dialogs, and PDF
-  preload.js           # Controlled bridge between main and renderer processes
+  main.js              # Electron main process: files, menus, dialogs, PDF
+  preload.js           # Controlled bridge between main and renderer
   renderer/
-    app.js             # Application state, editor wiring, history, and save state
-    i18n.js            # Chinese and English dictionaries and locale state
-    importer.js        # HTML parsing, Tailwind detection, and semantic naming
-    exporter.js        # Fidelity-oriented HTML export
-    styles.css         # Clay interface design system
+    app.js             # App state, editor wiring, history, save state
+    i18n.js            # Chinese and English dictionaries
+    importer.js        # HTML parsing, Tailwind detection, semantic naming
+    exporter.js        # Fidelity-first HTML export
+    styles.css         # Clay's interface design system
     vendor/            # Bundled GrapesJS runtime
-  tests/               # Editor, fidelity, and localization regressions
+  tests/               # Editor, fidelity, i18n, and production regressions
 docs/
-  screenshots/         # README interface screenshots
-  grapesjs-findings.md # Findings from the editor evaluation phase
+  readme/              # README artwork
+  grapesjs-findings.md # Notes from the editor evaluation
+scripts/
+  readme-assets/       # Regenerates docs/readme from the real app: zsh scripts/readme-assets/build.sh
 ```
 
 </details>
 
 ## Contributing
 
-Clay is still early, which makes real pages and clear reproduction steps especially useful. Open an [Issue](https://github.com/EasonYan7/clay/issues) for:
+Clay is early, so real pages and clear reproduction steps help the most. [Open an issue](https://github.com/EasonYan7/clay/issues) for HTML that doesn't import or export correctly, differences between the browser and the canvas, problems with drag and drop, history, saving, or file sync, and ideas for Windows and Linux or new translations.
 
-- HTML that does not import or export correctly
-- Differences between the browser and the Clay canvas
-- Drag and drop, history, saving, or file-sync problems
-- Windows and Linux adaptation ideas
-- New translations and copy improvements
-
-When reporting a problem, include your macOS version, steps to reproduce, expected behavior, and actual behavior. Remove sensitive information before sharing internal pages.
+Please include your macOS version, steps to reproduce, and expected versus actual behavior. Remove anything sensitive before sharing internal pages.
 
 ## Roadmap
 
-- Signed and notarized macOS builds through GitHub Releases
-- Broader fidelity coverage for complex CSS, Tailwind configurations, and dynamic pages
+- Signed and notarized macOS builds
+- Broader fidelity for complex CSS, Tailwind configurations, and dynamic pages
 - Windows and Linux support
-- A more complete contribution guide and open-source release process
+- A fuller contribution guide
 
 ## License
 
-Clay is open source under the [MIT License](./LICENSE). You may use, copy, modify, merge, publish, and distribute the project as long as the original copyright and license notice are retained.
+[MIT](./LICENSE)
 
----
+<br />
 
-If Clay is useful to you, consider leaving a ⭐ or bringing a real page to the issue tracker.
+<p align="center">
+  <img src="app/build/icon.png" width="44" alt="Clay" />
+  <br />
+  <sub>The last mile after AI.</sub>
+</p>
