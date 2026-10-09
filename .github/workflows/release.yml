@@ -1,0 +1,148 @@
+name: Clay Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    name: Build DMGs and publish release
+    runs-on: macos-14
+    timeout-minutes: 30
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      sha_arm64: ${{ steps.sums.outputs.sha_arm64 }}
+      sha_x64: ${{ steps.sums.outputs.sha_x64 }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Use Electron-supported Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.12.0
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      # Tag pushes must match app/package.json so the DMG names, the release
+      # tag and the cask version can never drift apart. Manual runs have no
+      # tag, so they release the version in package.json as v<version>.
+      - name: Resolve release version
+        id: meta
+        run: |
+          version="$(node -p "require('./app/package.json').version")"
+          if [ "${GITHUB_REF_TYPE}" = "tag" ] && [ "${GITHUB_REF_NAME}" != "v${version}" ]; then
+            echo "::error::Tag ${GITHUB_REF_NAME} does not match app/package.json version ${version} (expected v${version})."
+            exit 1
+          fi
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "tag=v${version}" >> "$GITHUB_OUTPUT"
+      - name: Install dependencies
+        run: npm ci --prefix app
+      # Builds are intentionally unsigned and not notarized. electron-builder
+      # applies an ad-hoc signature (mac.identity "-") so the bundle stays
+      # internally valid on Apple Silicon. Auto-discovery is disabled so CI
+      # never goes looking for a Developer ID certificate. The arm64 runner
+      # cross-builds the x64 DMG; there are no native modules to rebuild.
+      - name: Build arm64 and x64 DMGs
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        run: npm run dist --prefix app -- --publish never
+      - name: Verify artifacts and write checksums
+        id: sums
+        working-directory: app/dist
+        run: |
+          version="${{ steps.meta.outputs.version }}"
+          for arch in arm64 x64; do
+            test -f "Clay-${version}-${arch}.dmg" || { echo "::error::Missing Clay-${version}-${arch}.dmg"; exit 1; }
+          done
+          shasum -a 256 "Clay-${version}-arm64.dmg" "Clay-${version}-x64.dmg" | tee SHA256SUMS.txt
+          echo "sha_arm64=$(shasum -a 256 "Clay-${version}-arm64.dmg" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          echo "sha_x64=$(shasum -a 256 "Clay-${version}-x64.dmg" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+      # Create the release on first run; re-runs just replace the assets.
+      - name: Create or update GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        working-directory: app/dist
+        run: |
+          tag="${{ steps.meta.outputs.tag }}"
+          version="${{ steps.meta.outputs.version }}"
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            gh release create "$tag" --target "$GITHUB_SHA" --title "Clay ${version}" --generate-notes
+          fi
+          gh release upload "$tag" "Clay-${version}-arm64.dmg" "Clay-${version}-x64.dmg" SHA256SUMS.txt --clobber
+
+  update-cask:
+    name: Bump Homebrew cask
+    needs: build-and-release
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+    steps:
+      # The token is added by the repo owner later; until then this job is a
+      # no-op rather than a red build.
+      - name: Check tap token
+        id: gate
+        run: |
+          if [ -z "${HOMEBREW_TAP_TOKEN}" ]; then
+            echo "::notice::HOMEBREW_TAP_TOKEN is not set; skipping cask update."
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Check out tap
+        if: steps.gate.outputs.enabled == 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: EasonYan7/homebrew-clay
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: tap
+      # Rewrites only version and the two sha256 values, keeping whatever
+      # alignment/whitespace the cask already uses.
+      - name: Update cask version and checksums
+        if: steps.gate.outputs.enabled == 'true'
+        env:
+          VERSION: ${{ needs.build-and-release.outputs.version }}
+          SHA_ARM64: ${{ needs.build-and-release.outputs.sha_arm64 }}
+          SHA_X64: ${{ needs.build-and-release.outputs.sha_x64 }}
+        run: |
+          python3 - <<'PY'
+          import os, re, sys
+
+          path = "tap/Casks/clay.rb"
+          text = open(path, encoding="utf-8").read()
+
+          def sub_once(pattern, repl, label):
+              global text
+              text, n = re.subn(pattern, repl, text, count=1, flags=re.MULTILINE)
+              if n != 1:
+                  sys.exit(f"::error::Could not find {label} in {path}")
+
+          sub_once(r'^(\s*version\s+")[^"]*(")', lambda m: m.group(1) + os.environ["VERSION"] + m.group(2), "version")
+          sub_once(r'(\bsha256\s+arm:\s*")[^"]*(")', lambda m: m.group(1) + os.environ["SHA_ARM64"] + m.group(2), "arm sha256")
+          sub_once(r'(\bsha256\s+arm:\s*"[^"]*",\s*intel:\s*")[^"]*(")', lambda m: m.group(1) + os.environ["SHA_X64"] + m.group(2), "intel sha256")
+
+          open(path, "w", encoding="utf-8").write(text)
+          PY
+          grep -nE '^\s*(version|sha256)|^\s+intel:' tap/Casks/clay.rb
+      - name: Commit and push cask
+        if: steps.gate.outputs.enabled == 'true'
+        working-directory: tap
+        env:
+          VERSION: ${{ needs.build-and-release.outputs.version }}
+        run: |
+          if git diff --quiet; then
+            echo "Cask already up to date."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Casks/clay.rb
+          git commit -m "clay ${VERSION}"
+          git push

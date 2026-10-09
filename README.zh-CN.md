@@ -86,7 +86,33 @@ Clay 不要求登录账号，也不会把你打开的 HTML 主动上传到服务
 
 ## 快速开始
 
-### 环境要求
+### 通过 Homebrew 安装
+
+需要 Homebrew 7 或更高版本（可先运行 `brew update`）。Homebrew 只会加载你信任过的第三方 tap 中的 cask：
+
+```bash
+brew tap EasonYan7/clay
+```
+
+```bash
+brew trust --tap EasonYan7/clay
+```
+
+```bash
+brew install --cask clay
+```
+
+升级可运行 `brew upgrade --cask clay`，卸载可运行 `brew uninstall --cask clay`；如需同时删除应用数据，加上 `--zap`。
+
+也可以前往 [GitHub Releases](https://github.com/EasonYan7/clay/releases) 下载 DMG：Apple 芯片选择 `Clay-<version>-arm64.dmg`，Intel 芯片选择 `Clay-<version>-x64.dmg`。
+
+Clay 目前尚未使用 Apple Developer ID 签名，也未经过公证。通过 Homebrew 安装时，安装完成后会自动移除 macOS 的隔离属性，可以正常打开。手动安装 DMG 时，首次启动可能被 Gatekeeper 拦截，此时可前往“系统设置 → 隐私与安全性”，点击“仍要打开”，或运行：
+
+```bash
+xattr -dr com.apple.quarantine /Applications/Clay.app
+```
+
+### 从源码运行的环境要求
 
 - macOS
 - Node.js >= 22.12.0 与 npm
@@ -111,7 +137,7 @@ cd app
 npm run dist
 ```
 
-构建产物位于 `app/dist/`。当前产物未做代码签名与公证，macOS 可能阻止直接打开。
+构建产物位于 `app/dist/`，包括 `Clay-<version>-arm64.dmg`（Apple 芯片）和 `Clay-<version>-x64.dmg`（Intel 芯片）。当前产物未做代码签名与公证，macOS 可能阻止直接打开。
 
 ## 当前支持范围
 
