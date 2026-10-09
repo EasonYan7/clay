@@ -86,7 +86,33 @@ If the original page references remote fonts, images, styles, or scripts, previe
 
 ## Quick start
 
-### Requirements
+### Install with Homebrew
+
+Requires Homebrew 7 or later (run `brew update` first). Homebrew only loads casks from third-party taps after you trust them:
+
+```bash
+brew tap EasonYan7/clay
+```
+
+```bash
+brew trust --tap EasonYan7/clay
+```
+
+```bash
+brew install --cask clay
+```
+
+Upgrade with `brew upgrade --cask clay`, or uninstall with `brew uninstall --cask clay` (add `--zap` to also remove app data).
+
+You can also download the DMG from [GitHub Releases](https://github.com/EasonYan7/clay/releases): `Clay-<version>-arm64.dmg` for Apple Silicon, or `Clay-<version>-x64.dmg` for Intel.
+
+Clay is not yet signed with an Apple Developer ID or notarized. The Homebrew cask removes the macOS quarantine flag after installation, so Homebrew installs open normally. If you install from the DMG, Gatekeeper may block the first launch. To open it, go to System Settings → Privacy & Security and click "Open Anyway", or run:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/Clay.app
+```
+
+### Requirements for running from source
 
 - macOS
 - Node.js >= 22.12.0 and npm
@@ -111,7 +137,7 @@ cd app
 npm run dist
 ```
 
-Build artifacts are written to `app/dist/`. They are not currently code-signed or notarized, so macOS may block them from opening normally.
+Build artifacts are written to `app/dist/` as `Clay-<version>-arm64.dmg` (Apple Silicon) and `Clay-<version>-x64.dmg` (Intel). They are not currently code-signed or notarized, so macOS may block them from opening normally.
 
 ## Current support
 
