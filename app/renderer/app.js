@@ -878,7 +878,12 @@
      * describeGroup —— 它能把真编辑分类成"调整…/删除…";它认不出的(占位)一律不算。 */
     ed.UndoManager.getStack().on('add', () => { if (!histSuppressed) scheduleEditReconcile(); });
     ed.UndoManager.getStack().on('remove reset', scheduleHistory);
-    ed.on('undo redo', () => { if (!histSuppressed) scheduleEditReconcile(); });
+    // 撤销/重做改的是底层 CSS 规则,不会触发 component:styleUpdate;画布末尾那块
+    // clay-overrides 若不跟着重建,就会一直显示撤销前的样式(看上去像没撤销)。
+    ed.on('undo redo', () => {
+      if (ed === editor && activeDocId) healCanvas(ed, activeDocId);
+      if (!histSuppressed) scheduleEditReconcile();
+    });
     enableDirectDrag(ed);
     enableImageReplace(ed);
     enableAddEmpty(ed);
