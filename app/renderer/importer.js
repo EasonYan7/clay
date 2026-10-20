@@ -807,8 +807,15 @@
     wrapper.setStyle({});
     editor.Css.clear();
 
-    editor.setComponents(parsed.bodyHtml);
+    // 先装作者 CSS,再装组件:setComponents 会把元素的内联 style 转成 #id 规则,
+    // 而 setStyle 是整体替换。顺序反过来,内联宽度、CSS 变量等就会被清空。
     editor.setStyle(parsed.editorStyleText || parsed.styleText);
+    const authorRules = cssBaseline(editor);
+    editor.setComponents(parsed.bodyHtml);
+    // 内联 style 转成的规则不在作者 <style> 里,GrapesJS 输出 HTML 时也不再带 style 属性。
+    // 它们不能进基线,否则导出时会被当成“未改动的原文”跳过,宽度等内联样式就丢了。
+    const withInline = cssBaseline(editor);
+    const inlineKeys = Object.keys(withInline).filter((key) => authorRules[key] !== withInline[key]);
 
     // class/style 在 GrapesJS 中分别走 ClassManager / style model,不能只塞 attributes
     // (会被内部正规化吃掉);其余 data-*/lang/dir 等按普通属性保留。
@@ -823,6 +830,7 @@
     // 保存“刚导入、尚未编辑”时的规则快照。导出时用当前规则减去这份基线,
     // 才能识别带作者自定义 id 的元素修改;仅靠 #iXXX 会漏掉这类改动。
     parsed.baselineRules = cssBaseline(editor);
+    inlineKeys.forEach((key) => { delete parsed.baselineRules[key]; });
     return parsed;
   }
 
