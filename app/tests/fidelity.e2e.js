@@ -24,6 +24,7 @@ const fixture = `<!doctype html>
   <script type="application/json" data-body>{"where":"body"}</script>
   <pre id="spacing">  alpha
     beta</pre>
+  <div id="bar-track" style="position:relative;width:400px;height:20px"><div class="bar" style="position:absolute;left:0;top:0;height:20px;width:27%;--fill:rgb(4, 5, 6);background:var(--fill)"></div></div>
 </body>
 </html>`;
 const fixturePath = path.join(testDir, 'fidelity.html');
@@ -63,6 +64,11 @@ app.whenReady().then(async () => {
       const beforeColor = before.color;
       const beforeBackground = before.backgroundColor;
       const beforeFontSize = before.fontSize;
+      // 内联 style(百分比宽度、CSS 变量)必须在画布里生效,且仅仅打开文件不算修改。
+      const barEl = cdoc.querySelector('#bar-track .bar');
+      const barRatio = barEl.getBoundingClientRect().width / cdoc.getElementById('bar-track').getBoundingClientRect().width;
+      const barBackground = cdoc.defaultView.getComputedStyle(barEl).backgroundColor;
+      const dirtyAfterImport = !!d.dirty;
 
       // 模拟 componentFirst 对作者已有 #id 的修改。原 CSS 与外链样式均在后置
       // fidelity head 中,Clay override 必须再压到它们后面。
@@ -84,6 +90,7 @@ app.whenReady().then(async () => {
         fidelityHref: cdoc.querySelector('link[data-clay-fidelity]') && cdoc.querySelector('link[data-clay-fidelity]').href,
         fidelitySheet: !!(cdoc.querySelector('link[data-clay-fidelity]') && cdoc.querySelector('link[data-clay-fidelity]').sheet),
         beforeColor, beforeBackground, beforeFontSize,
+        barRatio, barBackground, dirtyAfterImport,
         afterColor: cdoc.defaultView.getComputedStyle(probe).color,
         headOrder,
         allCssNodes: [...cdoc.querySelectorAll('style,link[rel="stylesheet"]')].map((n) => ({
@@ -130,6 +137,28 @@ app.whenReady().then(async () => {
     // The export marker is localized by the app locale; the CSS payload is
     // the invariant under test, not the human-language label around it.
     assert.match(out, /\/\* (?:Clay 中调整的部分|Adjustments made in Clay) \*\/[\s\S]*#probe\{color:rgb\(9, 8, 7\);\}/);
+
+    assert.ok(Math.abs(result.barRatio - 0.27) < 0.01, 'inline width lost on import: ' + result.barRatio);
+    assert.strictEqual(result.barBackground, 'rgb(4, 5, 6)');
+    assert.strictEqual(result.dirtyAfterImport, false);
+    // The exported file must render the inline-styled bar exactly as the source did.
+    const exportedPath = path.join(testDir, 'exported.html');
+    fs.writeFileSync(exportedPath, out, 'utf8');
+    const viewer = new BrowserWindow({ show: false, width: 1000, height: 800 });
+    try {
+      await viewer.loadFile(exportedPath);
+      const exportedBar = await viewer.webContents.executeJavaScript(`(() => {
+        const bar = document.querySelector('#bar-track .bar');
+        return {
+          ratio: bar.getBoundingClientRect().width / document.getElementById('bar-track').getBoundingClientRect().width,
+          background: getComputedStyle(bar).backgroundColor,
+        };
+      })()`);
+      assert.ok(Math.abs(exportedBar.ratio - 0.27) < 0.01, 'inline width lost on export: ' + exportedBar.ratio);
+      assert.strictEqual(exportedBar.background, 'rgb(4, 5, 6)');
+    } finally {
+      viewer.destroy();
+    }
 
     process.stdout.write('fidelity.e2e: ok\n');
   } catch (err) {
