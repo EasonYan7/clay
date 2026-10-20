@@ -115,7 +115,7 @@ jobs:
           python3 - <<'PY'
           import os, re, sys
 
-          path = "tap/Casks/clay.rb"
+          path = "tap/Casks/clay-editor.rb"
           text = open(path, encoding="utf-8").read()
 
           def sub_once(pattern, repl, label):
@@ -130,7 +130,7 @@ jobs:
 
           open(path, "w", encoding="utf-8").write(text)
           PY
-          grep -nE '^\s*(version|sha256)|^\s+intel:' tap/Casks/clay.rb
+          grep -nE '^\s*(version|sha256)|^\s+intel:' tap/Casks/clay-editor.rb
       - name: Commit and push cask
         if: steps.gate.outputs.enabled == 'true'
         working-directory: tap
@@ -143,6 +143,6 @@ jobs:
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add Casks/clay.rb
+          git add Casks/clay-editor.rb
           git commit -m "clay ${VERSION}"
           git push

@@ -28,10 +28,10 @@ AI 能很快把页面做到八九成。剩下那一点——改一句文案、�
 ```bash
 brew tap EasonYan7/clay
 brew trust --tap EasonYan7/clay
-brew install --cask clay
+brew install --cask clay-editor
 ```
 
-需要 macOS 12 及以上、Homebrew 7 及以上。更习惯安装包？可以下载 [Apple 芯片或 Intel 版 DMG](https://github.com/EasonYan7/clay/releases/latest)。
+需要 macOS 12 及以上、Homebrew 7 及以上。cask 名为 `clay-editor`：Homebrew 官方库里的 `clay` 已指向另一款无关应用。更习惯安装包？可以下载 [Apple 芯片或 Intel 版 DMG](https://github.com/EasonYan7/clay/releases/latest)。
 
 <details>
 <summary><b>关于未签名版本</b></summary>
@@ -43,7 +43,7 @@ Clay 目前尚未使用 Apple Developer ID 签名，也未经过公证。通过 
 xattr -dr com.apple.quarantine /Applications/Clay.app
 ```
 
-升级运行 `brew upgrade --cask clay`；卸载运行 `brew uninstall --cask clay`，加上 `--zap` 可同时删除应用数据。
+升级运行 `brew upgrade --cask clay-editor`；卸载运行 `brew uninstall --cask clay-editor`，加上 `--zap` 可同时删除应用数据。
 
 </details>
 
