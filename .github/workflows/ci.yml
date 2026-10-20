@@ -79,4 +79,5 @@ jobs:
           sh -c 'npm run test:editor --prefix app &&
           npm run test:fidelity --prefix app &&
           npm run test:i18n --prefix app &&
-          npm run test:renderer-state --prefix app'
+          npm run test:renderer-state --prefix app &&
+          npm run test:undo-canvas --prefix app'
