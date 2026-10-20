@@ -28,10 +28,10 @@ AI gets a page most of the way there. The last stretch — one sentence, a butto
 ```bash
 brew tap EasonYan7/clay
 brew trust --tap EasonYan7/clay
-brew install --cask clay
+brew install --cask clay-editor
 ```
 
-Requires macOS 12+ and Homebrew 7+. Prefer a disk image? Download the DMG for [Apple silicon or Intel](https://github.com/EasonYan7/clay/releases/latest).
+Requires macOS 12+ and Homebrew 7+. The cask is named `clay-editor` because Homebrew already maps `clay` to an unrelated app. Prefer a disk image? Download the DMG for [Apple silicon or Intel](https://github.com/EasonYan7/clay/releases/latest).
 
 <details>
 <summary><b>About the unsigned build</b></summary>
@@ -43,7 +43,7 @@ Clay is not yet signed with an Apple Developer ID or notarized. The Homebrew cas
 xattr -dr com.apple.quarantine /Applications/Clay.app
 ```
 
-Upgrade with `brew upgrade --cask clay`. Uninstall with `brew uninstall --cask clay` (add `--zap` to remove app data too).
+Upgrade with `brew upgrade --cask clay-editor`. Uninstall with `brew uninstall --cask clay-editor` (add `--zap` to remove app data too).
 
 </details>
 
