@@ -1,7 +1,7 @@
 {
   "name": "clay",
   "productName": "Clay",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Turn AI-generated HTML into an editable visual canvas",
   "main": "main.js",
   "engines": {
@@ -9,9 +9,9 @@
   },
   "scripts": {
     "start": "electron .",
-    "test": "npm run test:static && npm run test:gui",
-    "test:static": "node --check main.js && node --check preload.js && node --check renderer/app.js && node --check renderer/importer.js && node --check renderer/exporter.js && node --check tests/run-editor-behavior.js && node --check tests/fidelity.e2e.js && node --check tests/i18n.e2e.js && node --check tests/production-chain.e2e.js && node --check tests/renderer-state-regression-test.js && node --check tests/main-process-regression-test.js && node --check tests/undo-canvas.e2e.js",
-    "test:gui": "npm run test:editor && npm run test:fidelity && npm run test:i18n && npm run test:renderer-state && npm run test:undo-canvas && npm run test:main-process && npm run test:production",
+    "test": "npm run test:static && npm run test:updater && npm run test:gui",
+    "test:static": "node --check main.js && node --check preload.js && node --check renderer/app.js && node --check renderer/importer.js && node --check renderer/exporter.js && node --check tests/run-editor-behavior.js && node --check tests/fidelity.e2e.js && node --check tests/i18n.e2e.js && node --check tests/production-chain.e2e.js && node --check tests/renderer-state-regression-test.js && node --check tests/main-process-regression-test.js && node --check tests/undo-canvas.e2e.js && node --check updater.js && node --check tests/updater-regression-test.js && node --check tests/updater.e2e.js && node --check renderer/svg-editor.js && node --check tests/svg-editing.e2e.js",
+    "test:gui": "npm run test:editor && npm run test:fidelity && npm run test:i18n && npm run test:renderer-state && npm run test:undo-canvas && npm run test:main-process && npm run test:production && npm run test:updates-ui && npm run test:svg",
     "test:fidelity": "electron tests/fidelity.e2e.js",
     "test:editor": "node tests/run-editor-behavior.js",
     "test:i18n": "electron tests/i18n.e2e.js",
@@ -19,7 +19,10 @@
     "test:undo-canvas": "electron tests/undo-canvas.e2e.js",
     "test:main-process": "electron tests/main-process-regression-test.js",
     "test:production": "node tests/production-chain.e2e.js",
-    "dist": "electron-builder --mac"
+    "dist": "electron-builder --mac",
+    "test:updater": "node tests/updater-regression-test.js",
+    "test:updates-ui": "electron tests/updater.e2e.js",
+    "test:svg": "electron tests/svg-editing.e2e.js"
   },
   "devDependencies": {
     "electron": "^43.4.1",
@@ -33,6 +36,7 @@
     },
     "files": [
       "main.js",
+      "updater.js",
       "preload.js",
       "renderer/**/*"
     ],

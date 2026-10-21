@@ -62,7 +62,8 @@ jobs:
           shasum -a 256 "Clay-${version}-arm64.dmg" "Clay-${version}-x64.dmg" | tee SHA256SUMS.txt
           echo "sha_arm64=$(shasum -a 256 "Clay-${version}-arm64.dmg" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
           echo "sha_x64=$(shasum -a 256 "Clay-${version}-x64.dmg" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
-      # Create the release on first run; re-runs just replace the assets.
+      # Keep new releases hidden until both installers and checksums are ready.
+      # Re-runs replace the assets before publishing the same release again.
       - name: Create or update GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -71,9 +72,10 @@ jobs:
           tag="${{ steps.meta.outputs.tag }}"
           version="${{ steps.meta.outputs.version }}"
           if ! gh release view "$tag" >/dev/null 2>&1; then
-            gh release create "$tag" --target "$GITHUB_SHA" --title "Clay ${version}" --generate-notes
+            gh release create "$tag" --target "$GITHUB_SHA" --title "Clay ${version}" --generate-notes --draft
           fi
           gh release upload "$tag" "Clay-${version}-arm64.dmg" "Clay-${version}-x64.dmg" SHA256SUMS.txt --clobber
+          gh release edit "$tag" --draft=false --latest
 
   update-cask:
     name: Bump Homebrew cask

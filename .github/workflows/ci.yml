@@ -25,6 +25,8 @@ jobs:
         run: npm ci --prefix app
       - name: Run static checks
         run: npm run test:static --prefix app
+      - name: Run update service regressions
+        run: npm run test:updater --prefix app
       - name: Reject high or critical advisories
         run: npm audit --audit-level=high --prefix app
 
@@ -80,4 +82,5 @@ jobs:
           npm run test:fidelity --prefix app &&
           npm run test:i18n --prefix app &&
           npm run test:renderer-state --prefix app &&
-          npm run test:undo-canvas --prefix app'
+          npm run test:undo-canvas --prefix app &&
+          npm run test:svg --prefix app'

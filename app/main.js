@@ -1,4 +1,5 @@
-const { app, BrowserWindow, Menu, dialog, ipcMain } = require('electron');
+const { app, BrowserWindow, Menu, dialog, ipcMain, net, shell } = require('electron');
+const { createUpdater, RELEASE_PAGE } = require('./updater');
 const fs = require('fs');
 const path = require('path');
 const { pathToFileURL } = require('url');
@@ -12,6 +13,9 @@ let win = null;
 let closeApproved = false;
 let closeRequestPending = false;
 let currentLocale = 'zh-CN';
+let updater = null;
+let updateDialogBusy = false;
+let updateMenuPhase = null;
 
 const RENDERER_INDEX_PATH = path.join(__dirname, 'renderer', 'index.html');
 const RENDERER_INDEX_URL = pathToFileURL(RENDERER_INDEX_PATH).href;
@@ -19,6 +23,17 @@ const RENDERER_INDEX_URL = pathToFileURL(RENDERER_INDEX_PATH).href;
 const MAIN_MESSAGES = {
   'zh-CN': {
     about: '关于 Clay', hide: '隐藏 Clay', quit: '退出 Clay', file: '文件', open: '打开 HTML 文件…',
+    updateMenu: '更新', updateDownloading: '正在下载更新…',
+    checkUpdates: '检查更新…', updateTitle: 'Clay 软件更新', updateAvailable: '发现新版本 {version}',
+    updateDetail: '当前版本：{current}。下载完成并校验后将打开安装包。请先保存编辑内容、退出 Clay，再将新版拖入「应用程序」覆盖安装。',
+    updateDownload: '下载并打开安装包', updateLater: '稍后', updateOpen: '打开安装包',
+    updateCurrent: '当前已是最新版本', updateCurrentDetail: '已检查正式发布版本。当前版本：{current}。',
+    updateFailed: '暂时无法完成更新', updateRetry: '重试', updateRelease: '查看发布页',
+    updateNetwork: '无法连接更新服务，请检查网络后重试。', updateRateLimit: '更新服务请求过于频繁，请稍后重试。',
+    updateInvalid: '新版安装包尚未就绪，请稍后重试或查看发布页。',
+    updateChecksum: '安装包校验失败，未打开文件。请重新下载。', updateDownloadFailed: '下载未完成，请检查网络和磁盘空间后重试。',
+    updateOpenFailed: '无法打开安装包，请重新下载或前往发布页。', updateUnsupported: '当前系统或芯片暂不支持应用内下载，请前往发布页。',
+    updateOpened: '安装包已打开', updateInstall: '请保存编辑内容并退出 Clay，再将安装包中的 Clay 拖入「应用程序」替换旧版，完成后重新打开。',
     paste: '粘贴代码导入…', save: '保存', saveAs: '另存为…', exportPdf: '导出 PDF…',
     copyCode: '复制整页代码（给开发）', edit: '编辑', undo: '撤销', redo: '重做', cut: '剪切',
     copy: '复制', pasteEdit: '粘贴', selectAll: '全选', view: '视图', reload: '重新加载',
@@ -32,6 +47,17 @@ const MAIN_MESSAGES = {
   },
   'en-US': {
     about: 'About Clay', hide: 'Hide Clay', quit: 'Quit Clay', file: 'File', open: 'Open HTML File…',
+    updateMenu: 'Update', updateDownloading: 'Downloading Update…',
+    checkUpdates: 'Check for Updates…', updateTitle: 'Clay Software Update', updateAvailable: 'Clay {version} is available',
+    updateDetail: 'Current version: {current}. Clay will verify the download and open the installer. Save your work and quit Clay, then drag the new app into Applications to replace it.',
+    updateDownload: 'Download and Open Installer', updateLater: 'Later', updateOpen: 'Open Installer',
+    updateCurrent: 'You’re up to date', updateCurrentDetail: 'Checked the latest stable release. Current version: {current}.',
+    updateFailed: 'Unable to complete the update', updateRetry: 'Retry', updateRelease: 'View Release',
+    updateNetwork: 'Could not reach the update service. Check your connection and try again.', updateRateLimit: 'Too many update requests. Please try again later.',
+    updateInvalid: 'The release package is not ready. Try later or view the release page.',
+    updateChecksum: 'Package verification failed. The file was not opened. Please download it again.', updateDownloadFailed: 'The download did not finish. Check your connection and disk space, then try again.',
+    updateOpenFailed: 'Could not open the installer. Download it again or visit the release page.', updateUnsupported: 'In-app downloads are not available for this system or architecture. Visit the release page.',
+    updateOpened: 'Installer opened', updateInstall: 'Save your work and quit Clay, then drag Clay from the installer into Applications to replace the old version. Reopen Clay when finished.',
     paste: 'Import Pasted Code…', save: 'Save', saveAs: 'Save As…', exportPdf: 'Export PDF…',
     copyCode: 'Copy Full Page Code', edit: 'Edit', undo: 'Undo', redo: 'Redo', cut: 'Cut', copy: 'Copy',
     pasteEdit: 'Paste', selectAll: 'Select All', view: 'View', reload: 'Reload', fullscreen: 'Toggle Full Screen',
@@ -509,12 +535,76 @@ function createWindow() {
   });
 }
 
+function updateMessage(key, values = {}) {
+  return mt(key).replace(/\{(\w+)\}/g, (_match, name) => String(values[name] || ''));
+}
+
+async function showUpdateDialog(options) {
+  if (!win || win.isDestroyed()) return { response: 1 };
+  return dialog.showMessageBox(win, { title: mt('updateTitle'), noLink: true, ...options });
+}
+
+async function showUpdates() {
+  if (!updater || updateDialogBusy) return updater && updater.getState();
+  if (['checking', 'downloading'].includes(updater.getState().phase)) return updater.getState();
+  if (!win || win.isDestroyed()) createWindow();
+  updateDialogBusy = true;
+  try {
+    let state = updater.getState();
+    if (!['available', 'ready'].includes(state.phase)) state = await updater.check();
+    if (state.phase === 'current') {
+      await showUpdateDialog({ message: mt('updateCurrent'), detail: updateMessage('updateCurrentDetail', { current: state.currentVersion }), buttons: ['OK'] });
+    } else if (state.phase === 'available' || state.phase === 'ready') {
+      const choice = await showUpdateDialog({
+        message: updateMessage('updateAvailable', { version: state.latestVersion }),
+        detail: updateMessage('updateDetail', { current: state.currentVersion }),
+        buttons: [mt(state.phase === 'ready' ? 'updateOpen' : 'updateDownload'), mt('updateLater')],
+        defaultId: 0, cancelId: 1,
+      });
+      if (choice.response !== 0) return updater.getState();
+      if (state.phase !== 'ready') state = await updater.download();
+      if (state.phase === 'ready' && await updater.openInstaller()) {
+        await showUpdateDialog({ message: mt('updateOpened'), detail: mt('updateInstall'), buttons: ['OK'] });
+      }
+    }
+    state = updater.getState();
+    if (state.phase === 'error' || state.phase === 'unsupported') {
+      const errors = { network: 'updateNetwork', 'rate-limit': 'updateRateLimit', 'invalid-release': 'updateInvalid', 'missing-asset': 'updateInvalid', checksum: 'updateChecksum', size: 'updateChecksum', download: 'updateDownloadFailed', open: 'updateOpenFailed' };
+      const choice = await showUpdateDialog({
+        type: 'warning', message: mt('updateFailed'),
+        detail: mt(state.phase === 'unsupported' ? 'updateUnsupported' : errors[state.error] || 'updateNetwork'),
+        buttons: [mt('updateRetry'), mt('cancel'), mt('updateRelease')], cancelId: 1,
+      });
+      if (choice.response === 2) await shell.openExternal(RELEASE_PAGE);
+      if (choice.response === 0 && state.phase !== 'unsupported') {
+        updateDialogBusy = false;
+        return await showUpdates();
+      }
+    }
+    return updater.getState();
+  } catch (err) {
+    return updater.getState();
+  } finally {
+    updateDialogBusy = false;
+  }
+}
+
+ipcMain.handle('clay:update-state', (event) => {
+  if (!isTrustedMainFrameEvent(event)) return null;
+  return updater && updater.getState();
+});
+ipcMain.handle('clay:check-updates', (event) => {
+  if (!isTrustedMainFrameEvent(event)) return null;
+  return showUpdates();
+});
+
 function buildMenu() {
   const template = [
     {
       label: 'Clay',
       submenu: [
         { role: 'about', label: mt('about') },
+        { id: 'clay-check-updates', label: mt('checkUpdates'), click: () => { void showUpdates(); } },
         { type: 'separator' },
         { role: 'hide', label: mt('hide') },
         { role: 'quit', label: mt('quit') },
@@ -579,6 +669,14 @@ function buildMenu() {
     },
     { label: mt('window'), submenu: [{ role: 'minimize', label: mt('minimize') }, { role: 'close', label: mt('close') }] },
   ];
+  const update = updater && updater.getState();
+  if (update && update.hasUpdate) {
+    template.push({ id: 'clay-update-menu', label: mt('updateMenu'), submenu: [{
+      label: mt(update.phase === 'downloading' ? 'updateDownloading' : update.phase === 'ready' ? 'updateOpen' : update.phase === 'error' ? 'updateRetry' : 'updateDownload'),
+      enabled: !['checking', 'downloading'].includes(update.phase),
+      click: () => { void showUpdates(); },
+    }] });
+  }
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
@@ -1153,8 +1251,27 @@ ipcMain.on('clay:reload-for-locale', (event, locale) => {
 
 app.whenReady().then(() => {
   currentLocale = normalizeLocale(app.getLocale());
+  updater = createUpdater({
+    currentVersion: app.getVersion(), platform: process.platform, arch: process.arch,
+    fetch: (url, options) => net.fetch(url, options),
+    cacheDir: path.join(app.getPath('userData'), 'updates'),
+    openPath: (file) => shell.openPath(file),
+    onChange: (state) => {
+      if (win && !win.isDestroyed()) win.webContents.send('clay:update-state-changed', state);
+      if (updateMenuPhase !== state.phase) { updateMenuPhase = state.phase; buildMenu(); }
+    },
+  });
   buildMenu();
   createWindow();
+  // Development and isolated regression runs never contact the release service automatically.
+  if (app.isPackaged) {
+    const checkInBackground = () => { if (!updateDialogBusy) void updater.check(); };
+    const initialCheck = setTimeout(checkInBackground, 5000);
+    const periodicCheck = setInterval(checkInBackground, 6 * 60 * 60 * 1000);
+    initialCheck.unref();
+    periodicCheck.unref();
+    app.once('before-quit', () => { clearTimeout(initialCheck); clearInterval(periodicCheck); });
+  }
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });
 
