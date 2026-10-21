@@ -17,6 +17,10 @@ const dialogs = [];
 const answers = [];
 const opened = [];
 const external = [];
+setTimeout(() => {
+  console.error(`Update UI regression timed out. Retained fixtures: ${testDir}`);
+  app.exit(1);
+}, 60000).unref();
 app.getVersion = () => '0.1.1';
 net.fetch = async (url) => {
   fetches++;
@@ -87,9 +91,11 @@ app.whenReady().then(async () => {
     assert(Menu.getApplicationMenu().getMenuItemById('clay-update-menu'));
 
     for (const locale of ['en-US', 'zh-CN']) {
-      const loaded = new Promise((resolve) => win.webContents.once('did-finish-load', resolve));
-      await js(`window.ClayI18n.setLocale(${JSON.stringify(locale)}); true`);
-      await loaded;
+      if (await js('window.ClayI18n.getLocale()') !== locale) {
+        const loaded = new Promise((resolve) => win.webContents.once('did-finish-load', resolve));
+        await js(`window.ClayI18n.setLocale(${JSON.stringify(locale)}); true`);
+        await loaded;
+      }
       await js('Promise.resolve(window.__clayReady).then(() => true)');
       await waitFor(() => js('document.querySelector("#btn-update").textContent.includes("0.2.0")'));
       assert.match(await js('document.querySelector("#btn-update").textContent'), locale === 'en-US' ? /Update/ : /新版/);
