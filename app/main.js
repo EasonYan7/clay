@@ -1296,9 +1296,11 @@ app.whenReady().then(() => {
   createWindow();
   // Development and isolated regression runs never contact the release service automatically.
   if (app.isPackaged) {
-    const checkInBackground = () => { if (!updateDialogBusy) void updater.check(); };
+    const checkInBackground = () => {
+      if (!updateDialogBusy && !installOnClose && !closeRequestPending) void updater.check();
+    };
     const initialCheck = setTimeout(checkInBackground, 5000);
-    const periodicCheck = setInterval(checkInBackground, 6 * 60 * 60 * 1000);
+    const periodicCheck = setInterval(checkInBackground, 30 * 60 * 1000);
     initialCheck.unref();
     periodicCheck.unref();
     app.once('before-quit', () => { clearTimeout(initialCheck); clearInterval(periodicCheck); });
