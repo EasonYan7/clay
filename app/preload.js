@@ -50,6 +50,11 @@ contextBridge.exposeInMainWorld('clay', {
     return () => ipcRenderer.removeListener('clay:request-close', handler);
   },
   respondToClose: (shouldClose) => ipcRenderer.send('clay:close-result', !!shouldClose),
+  onCloseCancelled: (cb) => {
+    const handler = () => cb();
+    ipcRenderer.on('clay:close-cancelled', handler);
+    return () => ipcRenderer.removeListener('clay:close-cancelled', handler);
+  },
   ...(process.env.CLAY_TEST_CLOSE
     ? {
       testRequestClose: () => ipcRenderer.send('clay:test-close-window'),

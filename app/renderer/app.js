@@ -3165,6 +3165,10 @@
   wireUpdates();
   if (window.clay && window.clay.onSourceChanged) window.clay.onSourceChanged(queueSourceChange);
   if (window.clay && window.clay.onRequestClose) window.clay.onRequestClose(handleCloseRequest);
+  if (window.clay && window.clay.onCloseCancelled) window.clay.onCloseCancelled(() => {
+    cleanExitCommitted = false;
+    void persist();
+  });
   enableFileDrop();
   enableLiveStyleInput();
   enableToolbarTips();

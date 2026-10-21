@@ -92,7 +92,7 @@ Open a local file, paste HTML from v0, Bolt, Lovable, or anywhere else — or tr
 | **PDF export** | Turn the finished page into a PDF in one click |
 | **Bilingual** | English and Simplified Chinese across the app, dialogs, and macOS menus |
 | **SVG editing** | Select vector text and shapes; double-click text to edit it in the sidebar. Adjust fill, stroke, size, and offsets; drag groups or nudge with arrow keys. Positioned text spans and arrow markers stay intact. Linked SVG images remain images; editing path control points is not supported. |
-| **Update checks** | Checks stable releases at startup and every six hours; the toolbar and menu-bar **Update** entries appear only for a newer release. **Clay → Check for Updates** is always available. Download, verify, and open the matching DMG, then save, quit, and replace the app manually |
+| **Update checks** | Checks stable releases at startup and every six hours; the toolbar and menu-bar **Update** entries appear only for a newer release. **Clay → Check for Updates** is always available. After verification, choose **Quit Clay and Open Installer**. Clay handles unsaved edits before quitting and opening the DMG for manual replacement; cancelling save or quit keeps the editor open |
 
 ## Local-first
 
