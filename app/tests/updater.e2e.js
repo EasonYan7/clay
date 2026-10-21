@@ -17,6 +17,11 @@ const dialogs = [];
 const answers = [];
 const opened = [];
 const external = [];
+let openError = '';
+let cancelSave = true;
+let quitRequests = 0;
+const savedFile = path.join(testDir, 'saved-before-update.html');
+app.quit = () => { quitRequests++; };
 setTimeout(() => {
   console.error(`Update UI regression timed out. Retained fixtures: ${testDir}`);
   app.exit(1);
@@ -32,7 +37,12 @@ net.fetch = async (url) => {
   if (url.endsWith('SHA256SUMS.txt')) return new Response(`${digest}  ${name}\n`);
   return new Response(body);
 };
-shell.openPath = async (file) => { opened.push(file); return ''; };
+shell.openPath = async (file) => {
+  if (openError) return openError;
+  opened.push(file);
+  return '';
+};
+dialog.showSaveDialog = async () => ({ canceled: cancelSave, filePath: cancelSave ? undefined : savedFile });
 shell.openExternal = async (url) => { external.push(url); };
 dialog.showMessageBox = async (_window, options) => {
   dialogs.push(options);
@@ -115,26 +125,72 @@ app.whenReady().then(async () => {
       }
     }
 
-    // A real toolbar click downloads the architecture-specific fixture and opens only its verified path.
-    answers.push(0, 0);
+    // Download completion offers a separate quit action; Later keeps editing.
+    answers.push(0, 1);
     await js('document.querySelector("#btn-update").click(); true');
-    await waitFor(() => opened.length === 1 && dialogs.at(-1).message.includes('安装包已打开'));
     await waitFor(() => js('!document.querySelector("#btn-update").disabled'));
-    assert.deepStrictEqual(fs.readFileSync(opened[0]), body);
-    assert(opened[0].endsWith(name));
-    assert(dialogs.some((item) => item.detail && item.detail.includes('退出 Clay')));
+    const cache = path.join(testDir, 'user-data', 'updates');
+    const installer = path.join(cache, fs.readdirSync(cache)[0], name);
+    assert.deepStrictEqual(fs.readFileSync(installer), body);
+    assert.match(dialogs.at(-1).buttons[0], /退出 Clay/);
+    assert.strictEqual(opened.length, 0);
+    assert.strictEqual(quitRequests, 0);
     assert.strictEqual((await js('window.clay.getUpdateState()')).phase, 'ready');
     assert.deepStrictEqual(external, []);
 
-    // Network failure is surfaced with an actionable release-page fallback.
-    fs.writeFileSync(opened[0], 'corrupt cached package');
-    answers.push(0, 1);
-    assert.strictEqual((await js('window.clay.checkForUpdates()')).error, 'checksum');
-    assert.strictEqual(opened.length, 1);
+    // Verification is repeated after close approval, and failures leave Clay open.
+    fs.writeFileSync(installer, 'corrupt cached package');
+    answers.push(0, 0);
+    await js('window.clay.checkForUpdates()');
+    await waitFor(() => js('window.clay.getUpdateState().then(s => s.error === "checksum")'));
+    await waitFor(() => answers.length === 0);
+    assert.strictEqual(opened.length, 0);
+    assert.strictEqual(win.isDestroyed(), false);
+    assert.strictEqual(quitRequests, 0);
     networkError = true;
     answers.push(2);
     assert.strictEqual((await js('window.clay.checkForUpdates()')).error, 'network');
     assert.deepStrictEqual(external, ['https://github.com/EasonYan7/clay/releases/latest']);
+    networkError = false;
+    answers.push(0, 1);
+    await js('window.clay.checkForUpdates()');
+
+    await js('window.__clay.runImport(\'<html><body><h1 id="update-note">Unsaved update note</h1></body></html>\', "Update note", null, "paste")');
+    await js('window.__clayEditor.getWrapper().find("#update-note")[0].addStyle({color:"#123456"}); true');
+    await waitFor(() => js('window.__clay.getDocs().some(d => d.dirty)'));
+
+    // Cancelling the unsaved-edits prompt or Save As prevents opening and quitting.
+    for (const closeAnswer of [2, 0]) {
+      answers.push(0, closeAnswer);
+      await js('window.clay.checkForUpdates()');
+      await waitFor(() => answers.length === 0);
+      await new Promise(resolve => setTimeout(resolve, 150));
+      assert.strictEqual(win.isDestroyed(), false);
+      assert.strictEqual(opened.length, 0);
+      assert.strictEqual(quitRequests, 0);
+    }
+
+    // An OS opening failure resumes workspace persistence after approved close.
+    openError = 'test opening failure';
+    answers.push(0, 1, 0);
+    await js('window.clay.checkForUpdates()');
+    await waitFor(() => answers.length === 0);
+    await waitFor(() => js('window.clay.getUpdateState().then(s => s.error === "open")'));
+    await js('window.__clayEditor.getWrapper().find("#update-note")[0].components("Still editing after failed install"); true');
+    await waitFor(() => fs.readFileSync(path.join(testDir, 'user-data', 'workspace.json'), 'utf8').includes('Still editing after failed install'));
+    assert.strictEqual(win.isDestroyed(), false);
+    assert.strictEqual(quitRequests, 0);
+
+    // Saving successfully hands off the verified package, closes the window and quits the app.
+    openError = '';
+    cancelSave = false;
+    answers.push(0, 0, 0);
+    Menu.getApplicationMenu().getMenuItemById('clay-check-updates').click();
+    await waitFor(() => quitRequests === 1);
+    assert.strictEqual(win.isDestroyed(), true);
+    assert.strictEqual(opened.length, 1);
+    assert.deepStrictEqual(fs.readFileSync(opened[0]), body);
+    assert(fs.readFileSync(savedFile, 'utf8').includes('Still editing after failed install'));
     assert.strictEqual(answers.length, 0);
     console.log(`Updater Electron integration passed. Screenshots and fixtures: ${testDir}`);
     app.exit(0);

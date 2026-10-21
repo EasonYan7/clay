@@ -16,6 +16,7 @@ let currentLocale = 'zh-CN';
 let updater = null;
 let updateDialogBusy = false;
 let updateMenuPhase = null;
+let installOnClose = false;
 
 const RENDERER_INDEX_PATH = path.join(__dirname, 'renderer', 'index.html');
 const RENDERER_INDEX_URL = pathToFileURL(RENDERER_INDEX_PATH).href;
@@ -25,15 +26,15 @@ const MAIN_MESSAGES = {
     about: '关于 Clay', hide: '隐藏 Clay', quit: '退出 Clay', file: '文件', open: '打开 HTML 文件…',
     updateMenu: '更新', updateDownloading: '正在下载更新…',
     checkUpdates: '检查更新…', updateTitle: 'Clay 软件更新', updateAvailable: '发现新版本 {version}',
-    updateDetail: '当前版本：{current}。下载完成并校验后将打开安装包。请先保存编辑内容、退出 Clay，再将新版拖入「应用程序」覆盖安装。',
-    updateDownload: '下载并打开安装包', updateLater: '稍后', updateOpen: '打开安装包',
+    updateDetail: '当前版本：{current}。下载并校验后，可退出 Clay 并打开安装包；未保存的编辑会先提示保存。再将新版拖入「应用程序」覆盖安装。',
+    updateDownload: '下载更新', updateLater: '稍后', updateOpen: '退出 Clay 并打开安装包',
+    updateReady: '更新已下载完成', updateReadyDetail: '安装包已通过校验。退出前会检查未保存的编辑；取消退出将继续留在 Clay。退出后将新版拖入「应用程序」覆盖安装。',
     updateCurrent: '当前已是最新版本', updateCurrentDetail: '已检查正式发布版本。当前版本：{current}。',
     updateFailed: '暂时无法完成更新', updateRetry: '重试', updateRelease: '查看发布页',
     updateNetwork: '无法连接更新服务，请检查网络后重试。', updateRateLimit: '更新服务请求过于频繁，请稍后重试。',
     updateInvalid: '新版安装包尚未就绪，请稍后重试或查看发布页。',
     updateChecksum: '安装包校验失败，未打开文件。请重新下载。', updateDownloadFailed: '下载未完成，请检查网络和磁盘空间后重试。',
     updateOpenFailed: '无法打开安装包，请重新下载或前往发布页。', updateUnsupported: '当前系统或芯片暂不支持应用内下载，请前往发布页。',
-    updateOpened: '安装包已打开', updateInstall: '请保存编辑内容并退出 Clay，再将安装包中的 Clay 拖入「应用程序」替换旧版，完成后重新打开。',
     paste: '粘贴代码导入…', save: '保存', saveAs: '另存为…', exportPdf: '导出 PDF…',
     copyCode: '复制整页代码（给开发）', edit: '编辑', undo: '撤销', redo: '重做', cut: '剪切',
     copy: '复制', pasteEdit: '粘贴', selectAll: '全选', view: '视图', reload: '重新加载',
@@ -49,15 +50,15 @@ const MAIN_MESSAGES = {
     about: 'About Clay', hide: 'Hide Clay', quit: 'Quit Clay', file: 'File', open: 'Open HTML File…',
     updateMenu: 'Update', updateDownloading: 'Downloading Update…',
     checkUpdates: 'Check for Updates…', updateTitle: 'Clay Software Update', updateAvailable: 'Clay {version} is available',
-    updateDetail: 'Current version: {current}. Clay will verify the download and open the installer. Save your work and quit Clay, then drag the new app into Applications to replace it.',
-    updateDownload: 'Download and Open Installer', updateLater: 'Later', updateOpen: 'Open Installer',
+    updateDetail: 'Current version: {current}. After verification, you can quit Clay and open the installer. Clay will prompt you to save unsaved edits first. Drag the new app into Applications to replace it.',
+    updateDownload: 'Download Update', updateLater: 'Later', updateOpen: 'Quit Clay and Open Installer',
+    updateReady: 'Your update is ready', updateReadyDetail: 'The installer has been verified. Clay will check for unsaved edits before quitting; cancel to keep editing. Then drag the new app into Applications to replace it.',
     updateCurrent: 'You’re up to date', updateCurrentDetail: 'Checked the latest stable release. Current version: {current}.',
     updateFailed: 'Unable to complete the update', updateRetry: 'Retry', updateRelease: 'View Release',
     updateNetwork: 'Could not reach the update service. Check your connection and try again.', updateRateLimit: 'Too many update requests. Please try again later.',
     updateInvalid: 'The release package is not ready. Try later or view the release page.',
     updateChecksum: 'Package verification failed. The file was not opened. Please download it again.', updateDownloadFailed: 'The download did not finish. Check your connection and disk space, then try again.',
     updateOpenFailed: 'Could not open the installer. Download it again or visit the release page.', updateUnsupported: 'In-app downloads are not available for this system or architecture. Visit the release page.',
-    updateOpened: 'Installer opened', updateInstall: 'Save your work and quit Clay, then drag Clay from the installer into Applications to replace the old version. Reopen Clay when finished.',
     paste: 'Import Pasted Code…', save: 'Save', saveAs: 'Save As…', exportPdf: 'Export PDF…',
     copyCode: 'Copy Full Page Code', edit: 'Edit', undo: 'Undo', redo: 'Redo', cut: 'Cut', copy: 'Copy',
     pasteEdit: 'Paste', selectAll: 'Select All', view: 'View', reload: 'Reload', fullscreen: 'Toggle Full Screen',
@@ -481,6 +482,7 @@ function refreshInternalWatch(filePath, content) {
 function createWindow() {
   closeApproved = false;
   closeRequestPending = false;
+  installOnClose = false;
   win = new BrowserWindow({
     width: 1480,
     height: 940,
@@ -527,6 +529,7 @@ function createWindow() {
   win.on('closed', () => {
     stopSourceWatch();
     closeRequestPending = false;
+    installOnClose = false;
     win = null;
     // The real macOS app intentionally stays resident after its last window
     // closes.  The isolated production runner, however, must observe a
@@ -545,7 +548,7 @@ async function showUpdateDialog(options) {
 }
 
 async function showUpdates() {
-  if (!updater || updateDialogBusy) return updater && updater.getState();
+  if (!updater || updateDialogBusy || installOnClose || closeRequestPending) return updater && updater.getState();
   if (['checking', 'downloading'].includes(updater.getState().phase)) return updater.getState();
   if (!win || win.isDestroyed()) createWindow();
   updateDialogBusy = true;
@@ -555,16 +558,24 @@ async function showUpdates() {
     if (state.phase === 'current') {
       await showUpdateDialog({ message: mt('updateCurrent'), detail: updateMessage('updateCurrentDetail', { current: state.currentVersion }), buttons: ['OK'] });
     } else if (state.phase === 'available' || state.phase === 'ready') {
-      const choice = await showUpdateDialog({
-        message: updateMessage('updateAvailable', { version: state.latestVersion }),
-        detail: updateMessage('updateDetail', { current: state.currentVersion }),
-        buttons: [mt(state.phase === 'ready' ? 'updateOpen' : 'updateDownload'), mt('updateLater')],
-        defaultId: 0, cancelId: 1,
-      });
-      if (choice.response !== 0) return updater.getState();
-      if (state.phase !== 'ready') state = await updater.download();
-      if (state.phase === 'ready' && await updater.openInstaller()) {
-        await showUpdateDialog({ message: mt('updateOpened'), detail: mt('updateInstall'), buttons: ['OK'] });
+      if (state.phase !== 'ready') {
+        const choice = await showUpdateDialog({
+          message: updateMessage('updateAvailable', { version: state.latestVersion }),
+          detail: updateMessage('updateDetail', { current: state.currentVersion }),
+          buttons: [mt('updateDownload'), mt('updateLater')], defaultId: 0, cancelId: 1,
+        });
+        if (choice.response !== 0) return updater.getState();
+        state = await updater.download();
+      }
+      if (state.phase === 'ready') {
+        const choice = await showUpdateDialog({
+          message: mt('updateReady'), detail: mt('updateReadyDetail'),
+          buttons: [mt('updateOpen'), mt('updateLater')], defaultId: 0, cancelId: 1,
+        });
+        if (choice.response === 0 && win && !win.isDestroyed()) {
+          installOnClose = true;
+          win.close();
+        }
       }
     }
     state = updater.getState();
@@ -985,12 +996,32 @@ ipcMain.handle('clay:confirm', async (event, opts) => {
   return response;
 });
 
-ipcMain.on('clay:close-result', (event, shouldClose) => {
+ipcMain.on('clay:close-result', async (event, shouldClose) => {
   if (!isTrustedMainFrameEvent(event) || !closeRequestPending) return;
+  if (!shouldClose) {
+    closeRequestPending = false;
+    installOnClose = false;
+    return;
+  }
+  const target = win;
+  const quitForUpdate = installOnClose;
+  installOnClose = false;
+  if (quitForUpdate && !await updater.openInstaller()) {
+    closeRequestPending = false;
+    if (!target.isDestroyed()) {
+      // The renderer has committed its close snapshot. Resume persistence
+      // when installer verification/opening fails and the window stays open.
+      target.webContents.send('clay:close-cancelled');
+      await showUpdateDialog({ type: 'warning', message: mt('updateFailed'),
+        detail: mt(updater.getState().error === 'checksum' ? 'updateChecksum' : 'updateOpenFailed'), buttons: ['OK'] });
+    }
+    return;
+  }
   closeRequestPending = false;
-  if (!shouldClose) return;
+  if (target.isDestroyed()) return;
   closeApproved = true;
-  win.close();
+  if (quitForUpdate) target.once('closed', () => app.quit());
+  target.close();
 });
 
 // 只有隔离用户数据的打包回归才开启:从主进程发起和红灯/⌘Q 同路的关窗。
