@@ -91,12 +91,16 @@ Open a local file, paste HTML from v0, Bolt, Lovable, or anywhere else — or tr
 | **Tailwind-aware** | Common Tailwind pages are recognized and converted to styles that work offline |
 | **PDF export** | Turn the finished page into a PDF in one click |
 | **Bilingual** | English and Simplified Chinese across the app, dialogs, and macOS menus |
+| **SVG editing** | Select vector text and shapes; double-click text to edit it in the sidebar. Adjust fill, stroke, size, and offsets; drag groups or nudge with arrow keys. Positioned text spans and arrow markers stay intact. Linked SVG images remain images; editing path control points is not supported. |
+| **Update checks** | Checks stable releases at startup and every six hours; the toolbar and menu-bar **Update** entries appear only for a newer release. **Clay → Check for Updates** is always available. Download, verify, and open the matching DMG, then save, quit, and replace the app manually |
 
 ## Local-first
 
 No account required. Clay reads, edits, and saves files on your Mac, and does not upload the HTML you open.
 
 If a page references remote fonts, images, styles, or scripts, previewing it may still contact those hosts — just as a browser would. Pages using the Tailwind Play CDN may need network access while previewing.
+
+Installed builds also contact GitHub for version checks. Update checks do not send your HTML or workspace contents. Source development builds check only when requested.
 
 ## Status
 
@@ -160,6 +164,9 @@ npm run dist       # build Clay-<version>-arm64.dmg and -x64.dmg into app/dist/
 | `npm run test:renderer-state` | Editor state, rich-text flush, CSS dirty state, navigation races |
 | `npm run test:main-process` | PDF script isolation, page-height limits, path capabilities, workspace recovery |
 | `npm run test:production` | The real `electron .` app: preload bridge, file checks, save, recovery, PDF, clean exit |
+| `npm run test:updater` | Version ordering, release assets, download verification, failures, and retries |
+| `npm run test:updates-ui` | Real preload/menu/toolbar update flow, bilingual layouts, and installer handoff with fixture downloads |
+| `npm run test:svg` | Vector selection, text, color, geometry, group movement, undo/redo, legacy workspaces, and export/reopen |
 
 CI runs the GUI suites on macOS and a behavioral subset under Xvfb on Linux. Pushing a `v*` tag builds both DMGs, publishes a GitHub Release, and updates the [Homebrew tap](https://github.com/EasonYan7/homebrew-clay).
 

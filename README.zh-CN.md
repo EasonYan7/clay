@@ -91,12 +91,16 @@ xattr -dr com.apple.quarantine /Applications/Clay.app
 | **识别 Tailwind** | 识别常见 Tailwind 页面，并转换为可离线使用的样式 |
 | **导出 PDF** | 改好的页面一键导出 PDF |
 | **中英双语** | 主页、编辑器、弹窗和 macOS 菜单均支持中文与英文 |
+| **SVG 编辑** | 点击选择矢量文字和形状，双击文字后在侧栏改字；调整填充、描边、尺寸和偏移，支持整组拖动及方向键微调，保留多行文字排版与箭头引用。外链 SVG 图片仍按图片处理，暂不支持路径控制点编辑。 |
+| **版本更新** | 启动及每六小时检查正式版；仅在发现新版时显示顶部按钮和菜单栏「更新」；「Clay → 检查更新」始终可用。下载、校验并打开对应芯片的 DMG 后，保存、退出并手动覆盖安装 |
 
 ## 本地优先
 
 无需账号。文件的读取、编辑和保存都在你的 Mac 上完成，Clay 不会上传你打开的 HTML。
 
 如果页面引用了在线字体、图片、样式或脚本，预览时仍可能访问这些资源的原始地址，和浏览器打开时一样。使用 Tailwind Play CDN 的页面在预览时也可能需要联网。
+
+已安装的发行版还会访问 GitHub 检查新版本，不发送你的 HTML 或工作区内容。从源码运行时，仅在手动请求后检查。
 
 ## 当前状态
 
@@ -160,6 +164,9 @@ npm run dist       # 在 app/dist/ 生成 Clay-<version>-arm64.dmg 与 -x64.dmg
 | `npm run test:renderer-state` | 编辑器状态、富文本收口、CSS 脏状态与切页竞态 |
 | `npm run test:main-process` | PDF 脚本隔离、页面高度限制、路径能力与工作区恢复 |
 | `npm run test:production` | 真实 `electron .` 应用：preload 桥接、文件校验、保存、恢复、PDF 与正常退出 |
+| `npm run test:updater` | 版本比较、发布包匹配、下载校验、失败与重试 |
+| `npm run test:updates-ui` | 使用下载样例验证真实桥接、菜单与按钮、中英文布局和安装包交接 |
+| `npm run test:svg` | 矢量选择、文字、颜色、尺寸、整组移动、撤销重做、旧工作区及导出重开 |
 
 CI 会在 macOS 上运行 GUI 测试，并在 Linux/Xvfb 下运行行为检查子集。推送 `v*` tag 会自动构建两个 DMG、发布 GitHub Release，并更新 [Homebrew tap](https://github.com/EasonYan7/homebrew-clay)。
 

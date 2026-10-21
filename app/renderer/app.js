@@ -36,6 +36,7 @@
   };
 
   let editor = null;
+  let svgEditing = null;
   let canvasTailwind = null;   // 当前画布是否带 Tailwind 运行时
   let docTailwind = false;     // 当前文档是否 Tailwind 页面
   let previewing = false;
@@ -633,6 +634,7 @@
       colorPicker: CLAY_COLOR_PICKER,
     });
     enableEditableTableCells(editor);
+    svgEditing = window.ClaySvgEditor.install(editor, { onChange: scheduleComputed });
     wireEditorEvents(editor);
     window.__clayEditor = editor; // 调试句柄
     return editor;
@@ -898,6 +900,7 @@
       run(editor) {
         const sel = editor.getSelected();
         if (!sel) return;
+        if (window.ClaySvgEditor.isEditable(sel)) return;
         const parent = sel.parent();
         if (!parent) return;                       // 页面根节点没有父级,不处理
         const tag = (sel.get('tagName') || 'div').toLowerCase();
@@ -921,6 +924,7 @@
     // 选中任一元素时,把这个按钮插到工具栏"同级复制"的后面(只插一次)
     ed.on('component:selected', (comp) => {
       if (!comp || comp === ed.getWrapper()) return;
+      if (window.ClaySvgEditor.isEditable(comp)) return;
       const tb = comp.get('toolbar');
       if (!tb || !tb.length) return;
       if (tb.some((t) => t.command === 'clay:add-empty')) return;   // 已经有了
@@ -1167,6 +1171,7 @@
         const rawTarget = e.target;
         const targetEl = rawTarget && (rawTarget.nodeType === 1 ? rawTarget : rawTarget.parentElement);
         if (!targetEl) return (dbg.down = 'outside');
+        if (targetEl.ownerSVGElement) return (dbg.down = 'svg');
         const editing = targetEl.closest && targetEl.closest('[contenteditable="true"]');
         if (editing) return (dbg.down = 'rte');
 
@@ -1335,7 +1340,7 @@
     nameEl.classList.remove('muted');
     parentBtn.hidden = !sel.parent();
     hint.style.display = 'none';
-    $('#style-mount').style.display = '';
+    $('#style-mount').style.display = window.ClaySvgEditor.isEditable(sel) ? 'none' : '';
     const similar = findSimilar(sel);
     if (similar.length) {
       $('#btn-apply-similar').textContent = t('selection.applySimilar', { count: similar.length });
@@ -1458,6 +1463,11 @@
     if (!editor) return;
     const sel = editor.getSelected();
     const info = $('#el-info');
+    if (window.ClaySvgEditor.isEditable(sel)) {
+      info.hidden = true;
+      watchSelectedSize(null);
+      return;
+    }
     if (!sel || sel === editor.getWrapper() || !sel.getEl()) {
       info.hidden = true;
       watchSelectedSize(null);
@@ -2663,6 +2673,7 @@
    * 计算签名、画历史、保存工作区或询问退出,否则最后几个字会像从没输入过一样消失。 */
   async function flushActiveTextEditing() {
     if (!editor) return;
+    if (svgEditing) svgEditing.flush();
     const editing = editor.getEditing && editor.getEditing();
     if (!editing) return;
     const view = editing.getView && editing.getView();
@@ -3128,7 +3139,30 @@
     else location.reload();
   });
 
+  function wireUpdates() {
+    const button = $('#btn-update');
+    if (!(window.clay && window.clay.getUpdateState && window.clay.checkForUpdates)) return;
+    function renderUpdate(state) {
+      if (!state) return;
+      const keys = { idle: 'check', checking: 'checking', available: 'available', downloading: 'downloading', ready: 'ready', current: 'current', error: 'error', unsupported: 'unsupported' };
+      button.hidden = !state.hasUpdate;
+      button.textContent = t('update.' + (keys[state.phase] || 'check'), { version: state.latestVersion, progress: state.progress });
+      button.disabled = ['checking', 'downloading'].includes(state.phase);
+      button.setAttribute('aria-busy', String(button.disabled));
+      button.title = t('update.hint');
+      button.classList.toggle('update-available', ['available', 'ready'].includes(state.phase));
+    }
+    button.onclick = async () => {
+      button.disabled = true;
+      try { renderUpdate(await window.clay.checkForUpdates() || { phase: 'idle' }); }
+      catch (err) { renderUpdate({ phase: 'error' }); }
+    };
+    if (window.clay.onUpdateState) window.clay.onUpdateState(renderUpdate);
+    window.clay.getUpdateState().then(renderUpdate).catch(() => renderUpdate({ phase: 'error' }));
+  }
+
   wireUI();
+  wireUpdates();
   if (window.clay && window.clay.onSourceChanged) window.clay.onSourceChanged(queueSourceChange);
   if (window.clay && window.clay.onRequestClose) window.clay.onRequestClose(handleCloseRequest);
   enableFileDrop();
@@ -3148,6 +3182,7 @@
   window.addEventListener('beforeunload', () => {
     if (!restored || !workspaceWritable) return;   // 还没读完/读失败只读 → 什么都别写
     if (cleanExitCommitted) return;   // 正常退出的空会话已同步写好,绝不能再拿旧 docs 覆盖回来
+    if (svgEditing) svgEditing.flush();
     clearTimeout(persistTimer);
     snapshotActive();
     const json = workspaceJson();

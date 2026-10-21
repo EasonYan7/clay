@@ -1,6 +1,13 @@
 const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 contextBridge.exposeInMainWorld('clay', {
+  getUpdateState: () => ipcRenderer.invoke('clay:update-state'),
+  checkForUpdates: () => ipcRenderer.invoke('clay:check-updates'),
+  onUpdateState: (cb) => {
+    const handler = (_event, state) => cb(state);
+    ipcRenderer.on('clay:update-state-changed', handler);
+    return () => ipcRenderer.removeListener('clay:update-state-changed', handler);
+  },
   saveFile: (defaultName, content, sourcePath) =>
     ipcRenderer.invoke('clay:save-file', defaultName, content, sourcePath),
   // 从桌面拖文件进窗口:拖来的 File 对象本身不带磁盘路径(渲染进程沙箱化后
