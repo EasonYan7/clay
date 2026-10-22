@@ -7,7 +7,7 @@
 - **A 是后续 Windows 主线**：`C:\dev\clay-a`，分支 `win-port-a`。B 不再作为维护和交付目标；B 的目录、分支、文件和任务均未修改或删除，本轮没有运行 B。
 - 双击 `C:\dev\clay-a\START-WINDOWS.cmd` 启动已重建的 A。实际程序是 `C:\dev\clay-a\app\dist\win-unpacked\Clay.exe`。
 - ZIP：`C:\dev\clay-a\app\dist\Clay-0.1.4-win-x64.zip`，146,773,230 字节。SHA-256：`71eb91a95c1c39065d84037ca6f142a467024bc1de0ff6eaec7359dce06dd67b`。
-- 初次验证交付时未提交、未 push；后续经用户授权，将源码、测试、本文档与两张截图提交到 `win-port-a` 并向 fork 的 `main` 发起 PR。安装包、原始日志及隔离用户数据仅保留本地。无新增应用依赖、原生模块、系统软件、注册表或系统设置改动。
+- 初次验证交付时未提交、未 push；后续经用户授权，将源码、测试、本文档与截图提交到 `pissyc-pixel:win-port-a`，向上游 `EasonYan7/clay` 的 `main` 发起 PR，fork 仅承载贡献分支。安装包、原始日志及隔离用户数据仅保留本地。无新增应用依赖、原生模块、系统软件、注册表或系统设置改动。
 - 源码回归和打包程序的默认 / 150% 缩放均验证；ASAR 内 8 个关键文件逐字节匹配当前源码，包括按需加载器与图标，避免交付旧 EXE 配新源码。
 
 ## 界面与体验
