@@ -336,6 +336,42 @@ body.light .empty-card h1 em::after {
   font-size: 11px; font-weight: 600; letter-spacing: .3px; color: var(--text-2);
 }
 
+:root[data-platform="win32"] { --mono: Consolas, "Cascadia Mono", monospace; }
+:root[data-platform="win32"] body,
+:root[data-platform="win32"] .btn-kbd { font-family: "Segoe UI", "Microsoft YaHei UI", sans-serif; }
+#btn-app-menu, #window-context { display: none; }
+:root[data-platform="win32"] #topbar {
+  height: 48px; padding-left: 10px;
+  padding-right: calc(max(138px, calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw))) + 10px);
+  -webkit-app-region: drag; user-select: none;
+}
+:root[data-platform="win32"].window-fullscreen #topbar { padding-right: 10px; }
+:root[data-platform="win32"] #btn-app-menu { display: flex; flex-shrink: 0; }
+:root[data-platform="win32"] #topbar > :not(.tb-spacer) { flex-shrink: 0; }
+:root[data-platform="win32"] .tb-spacer { min-width: 0; }
+:root[data-platform="win32"] #window-context {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  min-width: 0; padding: 0 10px; font-size: 12px; color: var(--text-2);
+}
+#window-document { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#window-status {
+  flex-shrink: 0; padding: 3px 7px; border-radius: 5px;
+  color: var(--text-2); background: var(--surface-2); font-size: 10px;
+}
+#window-status[data-dirty="true"] { color: var(--accent-2); background: var(--accent-soft); }
+:root[data-platform="win32"] #topbar button:disabled { opacity: .4; cursor: default; pointer-events: none; }
+:root[data-platform="win32"] #topbar button:focus-visible,
+:root[data-platform="win32"] .doc-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+:root[data-platform="win32"] #btn-export-pdf[aria-busy="true"] { opacity: .8; cursor: progress; }
+:root[data-platform="win32"] #btn-export-pdf[aria-busy="true"] .btn-ic {
+  width: 14px; height: 14px; border: 2px solid var(--border-2); border-top-color: var(--accent-2);
+  border-radius: 50%; animation: window-busy .7s linear infinite;
+}
+:root[data-platform="win32"] #btn-export-pdf[aria-busy="true"] .btn-ic .ic { display: none; }
+@keyframes window-busy { to { transform: rotate(360deg); } }
+@media (max-width: 1150px) { :root[data-platform="win32"] #window-document { display: none; } }
+@media (prefers-reduced-motion: reduce) { :root[data-platform="win32"] #btn-export-pdf[aria-busy="true"] .btn-ic { animation: none; } }
+
 .empty-samples { margin-top: 30px; }
 .samples-label {
   display: block; margin-bottom: 12px; font-size: 13.5px;

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, dialog, ipcMain, net, shell } = require('electron');
+const { app, BrowserWindow, Menu, dialog, ipcMain, net, shell, screen } = require('electron');
 const { createUpdater, RELEASE_PAGE } = require('./updater');
 const fs = require('fs');
 const path = require('path');
@@ -17,6 +17,9 @@ let updater = null;
 let updateDialogBusy = false;
 let updateMenuPhase = null;
 let installOnClose = false;
+let windowPreferences = {};
+let windowPreferencesTimer = null;
+let appMenuOpen = false;
 
 const RENDERER_INDEX_PATH = path.join(__dirname, 'renderer', 'index.html');
 const RENDERER_INDEX_URL = pathToFileURL(RENDERER_INDEX_PATH).href;
@@ -24,6 +27,7 @@ const RENDERER_INDEX_URL = pathToFileURL(RENDERER_INDEX_PATH).href;
 const MAIN_MESSAGES = {
   'zh-CN': {
     about: '关于 Clay', hide: '隐藏 Clay', quit: '退出 Clay', file: '文件', open: '打开 HTML 文件…',
+    help: '帮助', exit: '退出',
     updateMenu: '更新', updateDownloading: '正在下载更新…',
     checkUpdates: '检查更新…', updateTitle: 'Clay 软件更新', updateAvailable: '发现新版本 {version}',
     updateDetail: '当前版本：{current}。下载并校验后，可退出 Clay 并打开安装包；未保存的编辑会先提示保存。再将新版拖入「应用程序」覆盖安装。',
@@ -48,6 +52,7 @@ const MAIN_MESSAGES = {
   },
   'en-US': {
     about: 'About Clay', hide: 'Hide Clay', quit: 'Quit Clay', file: 'File', open: 'Open HTML File…',
+    help: 'Help', exit: 'Exit',
     updateMenu: 'Update', updateDownloading: 'Downloading Update…',
     checkUpdates: 'Check for Updates…', updateTitle: 'Clay Software Update', updateAvailable: 'Clay {version} is available',
     updateDetail: 'Current version: {current}. After verification, you can quit Clay and open the installer. Clay will prompt you to save unsaved edits first. Drag the new app into Applications to replace it.',
@@ -479,6 +484,57 @@ function refreshInternalWatch(filePath, content) {
   }
 }
 
+function windowsTitleBar(theme) {
+  return { color: theme === 'light' ? '#ffffff' : '#151517', symbolColor: theme === 'light' ? '#17171a' : '#ededf0', height: 48 };
+}
+
+function windowsWindowOptions() {
+  try {
+    const saved = JSON.parse(fs.readFileSync(path.join(app.getPath('userData'), 'window-state.json'), 'utf8'));
+    windowPreferences = saved && typeof saved === 'object' ? saved : {};
+  } catch (error) {
+    windowPreferences = {};
+  }
+  const area = screen.getPrimaryDisplay().workAreaSize;
+  const width = Number.isInteger(windowPreferences.width) ? windowPreferences.width : 1480;
+  const height = Number.isInteger(windowPreferences.height) ? windowPreferences.height : 940;
+  return {
+    width: Math.min(area.width, Math.max(1100, width)),
+    height: Math.min(area.height, Math.max(700, height)),
+    minWidth: Math.min(1100, area.width),
+    minHeight: Math.min(700, area.height),
+    autoHideMenuBar: true,
+    show: false,
+    titleBarOverlay: windowsTitleBar(windowPreferences.theme),
+    backgroundColor: windowPreferences.theme === 'light' ? '#f0f0f2' : '#0d0d0f',
+    icon: path.join(__dirname, 'build', 'icon.png'),
+  };
+}
+
+function saveWindowsWindowState() {
+  clearTimeout(windowPreferencesTimer);
+  if (process.platform !== 'win32' || !win || win.isDestroyed()) return;
+  const bounds = win.getNormalBounds();
+  windowPreferences = {
+    width: bounds.width, height: bounds.height, maximized: win.isMaximized(),
+    theme: windowPreferences.theme === 'light' ? 'light' : 'dark',
+  };
+  try {
+    const filePath = path.join(app.getPath('userData'), 'window-state.json');
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    fs.writeFileSync(filePath + '.tmp', JSON.stringify(windowPreferences), 'utf8');
+    fs.renameSync(filePath + '.tmp', filePath);
+  } catch (error) {
+    console.warn('Unable to save window preferences:', error.message);
+  }
+}
+
+function scheduleWindowStateSave() {
+  clearTimeout(windowPreferencesTimer);
+  windowPreferencesTimer = setTimeout(saveWindowsWindowState, 300);
+  windowPreferencesTimer.unref();
+}
+
 function createWindow() {
   closeApproved = false;
   closeRequestPending = false;
@@ -489,8 +545,9 @@ function createWindow() {
     minWidth: 1100,
     minHeight: 700,
     title: 'Clay',
-    titleBarStyle: 'hiddenInset',
+    titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : process.platform === 'win32' ? 'hidden' : 'default',
     backgroundColor: '#14141f',
+    ...(process.platform === 'win32' ? windowsWindowOptions() : {}),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -498,6 +555,48 @@ function createWindow() {
       sandbox: true,
     },
   });
+  if (process.platform === 'win32') {
+    const targetWindow = win;
+    targetWindow.once('ready-to-show', () => {
+      if (targetWindow.isDestroyed()) return;
+      if (windowPreferences.maximized === true) targetWindow.maximize();
+      targetWindow.show();
+    });
+    let lastFullscreen;
+    const publishFullscreen = (fullscreen) => {
+      if (targetWindow.isDestroyed() || lastFullscreen === fullscreen) return;
+      lastFullscreen = fullscreen;
+      targetWindow.webContents.send('clay:window-fullscreen', fullscreen);
+    };
+    const syncFullscreen = () => { if (!targetWindow.isDestroyed()) publishFullscreen(targetWindow.isFullScreen()); };
+    targetWindow.on('enter-full-screen', () => publishFullscreen(true));
+    targetWindow.on('leave-full-screen', () => publishFullscreen(false));
+    targetWindow.on('resize', () => setImmediate(syncFullscreen));
+    targetWindow.webContents.on('did-finish-load', () => { lastFullscreen = undefined; syncFullscreen(); });
+    let altMenuCandidate = false;
+    targetWindow.on('blur', () => { altMenuCandidate = false; });
+    targetWindow.webContents.on('before-input-event', (event, input) => {
+      if (input.key === 'Alt') {
+        if (input.type === 'keyDown') altMenuCandidate = !input.control && !input.shift && !input.meta && !input.isAutoRepeat;
+        if (input.type === 'keyUp') {
+          if (altMenuCandidate) {
+            event.preventDefault();
+            targetWindow.webContents.send('clay:activate-menu');
+          }
+          altMenuCandidate = false;
+        }
+      } else if (input.type === 'keyDown') {
+        altMenuCandidate = false;
+        if (input.key === 'F10' && !input.shift && !input.control && !input.alt && !input.meta) {
+          event.preventDefault();
+          targetWindow.webContents.send('clay:activate-menu');
+        }
+      }
+    });
+    win.on('resize', scheduleWindowStateSave);
+    win.on('maximize', scheduleWindowStateSave);
+    win.on('unmaximize', scheduleWindowStateSave);
+  }
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   win.webContents.on('will-navigate', (navigationEvent, url) => {
     if (url !== RENDERER_INDEX_URL) navigationEvent.preventDefault();
@@ -516,6 +615,7 @@ function createWindow() {
   });
   win.loadFile(RENDERER_INDEX_PATH);
   win.on('close', (event) => {
+    saveWindowsWindowState();
     if (closeApproved) return;
     if (win.webContents.isDestroyed()) {
       closeApproved = true;
@@ -527,6 +627,7 @@ function createWindow() {
     win.webContents.send('clay:request-close');
   });
   win.on('closed', () => {
+    clearTimeout(windowPreferencesTimer);
     stopSourceWatch();
     closeRequestPending = false;
     installOnClose = false;
@@ -610,8 +711,9 @@ ipcMain.handle('clay:check-updates', (event) => {
 });
 
 function buildMenu() {
+  const isWindows = process.platform === 'win32';
   const template = [
-    {
+    ...(isWindows ? [] : [{
       label: 'Clay',
       submenu: [
         { role: 'about', label: mt('about') },
@@ -620,7 +722,7 @@ function buildMenu() {
         { role: 'hide', label: mt('hide') },
         { role: 'quit', label: mt('quit') },
       ],
-    },
+    }]),
     {
       label: mt('file'),
       submenu: [
@@ -656,13 +758,18 @@ function buildMenu() {
           accelerator: 'CmdOrCtrl+E',
           click: () => win && win.webContents.send('clay-menu', 'copy-code'),
         },
+        ...(isWindows ? [
+          { type: 'separator' },
+          { role: 'close', label: mt('close') },
+          { role: 'quit', label: mt('exit') },
+        ] : []),
       ],
     },
     {
       label: mt('edit'),
       submenu: [
         { role: 'undo', label: mt('undo') },
-        { role: 'redo', label: mt('redo') },
+        { role: 'redo', label: mt('redo'), ...(isWindows ? { accelerator: 'Ctrl+Shift+Z' } : {}) },
         { type: 'separator' },
         { role: 'cut', label: mt('cut') },
         { role: 'copy', label: mt('copy') },
@@ -678,7 +785,11 @@ function buildMenu() {
         { role: 'toggleDevTools', label: mt('devtools') },
       ],
     },
-    { label: mt('window'), submenu: [{ role: 'minimize', label: mt('minimize') }, { role: 'close', label: mt('close') }] },
+    ...(isWindows ? [{ label: mt('help'), submenu: [
+      { id: 'clay-check-updates', label: mt('checkUpdates'), click: () => { void showUpdates(); } },
+      { type: 'separator' },
+      { role: 'about', label: mt('about') },
+    ] }] : [{ label: mt('window'), submenu: [{ role: 'minimize', label: mt('minimize') }, { role: 'close', label: mt('close') }] }]),
   ];
   const update = updater && updater.getState();
   if (update && update.hasUpdate) {
@@ -834,6 +945,7 @@ ipcMain.handle('clay:export-pdf', async (event, defaultName, html, width, height
       height: shotHeight,
       useContentSize: true,
       webPreferences: {
+        ...(process.platform === 'win32' ? { offscreen: true } : {}),
         javascript: false,
         contextIsolation: true,
         nodeIntegration: false,
@@ -1261,6 +1373,35 @@ ipcMain.handle('clay:load-workspace', async (event) => {
   }
 });
 
+ipcMain.on('clay:window-theme', (event, theme) => {
+  if (process.platform !== 'win32' || !isTrustedMainFrameEvent(event) || !['light', 'dark'].includes(theme)) return;
+  windowPreferences.theme = theme;
+  win.setTitleBarOverlay(windowsTitleBar(theme));
+  win.setBackgroundColor(theme === 'light' ? '#f0f0f2' : '#0d0d0f');
+  scheduleWindowStateSave();
+});
+
+ipcMain.handle('clay:app-menu', async (event, point) => {
+  if (process.platform !== 'win32' || !isTrustedMainFrameEvent(event) || appMenuOpen) return false;
+  if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return false;
+  const menu = Menu.getApplicationMenu();
+  if (!menu) return false;
+  const bounds = win.getContentBounds();
+  const zoom = win.webContents.getZoomFactor();
+  appMenuOpen = true;
+  try {
+    await new Promise((resolve) => menu.popup({
+      window: win,
+      x: Math.round(Math.max(0, Math.min(bounds.width - 1, point.x * zoom))),
+      y: Math.round(Math.max(0, Math.min(bounds.height - 1, point.y * zoom))),
+      callback: resolve,
+    }));
+    return true;
+  } finally {
+    appMenuOpen = false;
+  }
+});
+
 ipcMain.on('clay:set-locale', (event, locale) => {
   if (!isTrustedMainFrameEvent(event)) return;
   const next = normalizeLocale(locale);
@@ -1282,6 +1423,13 @@ ipcMain.on('clay:reload-for-locale', (event, locale) => {
 
 app.whenReady().then(() => {
   currentLocale = normalizeLocale(app.getLocale());
+  if (process.platform === 'win32') {
+    app.setAppUserModelId('com.clay.editor');
+    app.setAboutPanelOptions({
+      applicationName: 'Clay', applicationVersion: app.getVersion(),
+      iconPath: path.join(__dirname, 'build', 'icon.png'),
+    });
+  }
   updater = createUpdater({
     currentVersion: app.getVersion(), platform: process.platform, arch: process.arch,
     fetch: (url, options) => net.fetch(url, options),
@@ -1295,7 +1443,7 @@ app.whenReady().then(() => {
   buildMenu();
   createWindow();
   // Development and isolated regression runs never contact the release service automatically.
-  if (app.isPackaged) {
+  if (app.isPackaged && process.platform === 'darwin') {
     const checkInBackground = () => {
       if (!updateDialogBusy && !installOnClose && !closeRequestPending) void updater.check();
     };
