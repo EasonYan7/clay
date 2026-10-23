@@ -8,7 +8,8 @@ if (process.platform !== 'win32') {
   console.log('windows-shell.e2e: skipped (Windows runtime required)');
   app.quit();
 } else {
-  const testDir = fs.mkdtempSync(path.join(os.tmpdir(), 'clay-windows-shell-'));
+  // Main canonicalizes file paths, so expand 8.3 short temp paths (e.g. RUNNER~1) up front.
+  const testDir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'clay-windows-shell-')));
   process.env.CLAY_USERDATA = path.join(testDir, 'profile');
   delete process.env.CLAY_PDF_OUT;
   const pdfPath = path.join(testDir, '页面 PDF.pdf');

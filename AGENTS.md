@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-Clay is a local-first macOS Electron app for visually editing HTML with GrapesJS.
+Clay is a local-first Electron app for visually editing HTML with GrapesJS. macOS is the supported platform; Windows x64 support is experimental (no installer, signing, or updates).
 
 - `app/main.js`: native windows, menus, file access, workspace persistence, and PDF export.
 - `app/preload.js`: controlled IPC bridge between main and renderer.
@@ -12,11 +12,11 @@ Clay is a local-first macOS Electron app for visually editing HTML with GrapesJS
 - `docs/readme/` and `scripts/readme-assets/`: README media and generation scripts; `app/build/` contains packaging assets.
 - `.github/workflows/`: CI and release automation.
 
-## Windows Development
+## Windows Development (Experimental)
 
 - Keep platform differences behind `process.platform` and the existing preload platform bridge; preserve macOS behavior, native window controls, and imported-page color-scheme fidelity.
 - Run `npm run test:static` and `npm run test:platform` on any supported host. On Windows, also run `npm run test:windows`, `npm run test:windows-shell`, and `npm run test:windows-shell -- --force-device-scale-factor=1.5`.
-- Use isolated `CLAY_USERDATA` directories and an interactive desktop for GUI tests; run display sessions serially. The macOS DMG update UI suite does not validate Windows updates.
+- Use isolated `CLAY_USERDATA` directories and an interactive desktop for GUI tests; run display sessions serially. The macOS DMG update UI suite does not validate Windows updates. CI runs these suites in the `Electron E2E (Windows, experimental)` job; keep it green.
 
 ## Build, Test, and Development Commands
 
@@ -31,6 +31,7 @@ npm run test:fidelity  # Check HTML import, canvas, and export
 npm run test:undo-canvas # Check canvas repaint after undo/redo
 npm run test:updater    # Check release detection and verified downloads
 npm run dist           # Build arm64/x64 macOS DMGs into app/dist/
+npm run dist:win       # Build an unsigned Windows x64 ZIP (experimental)
 ```
 
 Install Poppler (`brew install poppler`) for full PDF inspection. CI also runs `npm audit --audit-level=high`.
@@ -41,7 +42,7 @@ Follow existing plain JavaScript: two-space indentation, semicolons, single-quot
 
 ## Testing Guidelines
 
-Tests use Node's `assert` with custom Electron harnesses. Follow existing `*.e2e.js` or `*-regression-test.js` naming and wire new suites into `package.json`. No coverage percentage is enforced. Add focused regressions for behavioral fixes; verify import → edit → undo/redo → save/export → reopen for fidelity changes. Isolate workspaces in temporary directories using `CLAY_USERDATA` or Electron's test user-data path. Run GUI suites on macOS; Linux CI covers a subset under Xvfb.
+Tests use Node's `assert` with custom Electron harnesses. Follow existing `*.e2e.js` or `*-regression-test.js` naming and wire new suites into `package.json`. No coverage percentage is enforced. Add focused regressions for behavioral fixes; verify import → edit → undo/redo → save/export → reopen for fidelity changes. Isolate workspaces in temporary directories using `CLAY_USERDATA` or Electron's test user-data path. Run GUI suites on macOS; Linux CI covers a subset under Xvfb, and Windows CI covers the Windows shell plus the same subset.
 
 ## Commit & Pull Request Guidelines
 

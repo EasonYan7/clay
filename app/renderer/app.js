@@ -666,11 +666,14 @@
    * 同样的方式解析。没有源文件(粘贴导入)时清空,不装错的。 */
   function fileDirHref(sourcePath) {
     if (!sourcePath) return '';
-    const normalized = isWindows ? sourcePath.replace(/\\/g, '/') : sourcePath;
+    // 盘符或 \\server 开头的一定是 Windows 路径(Unix 绝对路径总以 / 开头),
+    // 没注入 preload 平台信息时也照样按 Windows 规则转换。
+    const windowsPath = isWindows || /^[a-z]:[\\/]|^\\\\/i.test(sourcePath);
+    const normalized = windowsPath ? sourcePath.replace(/\\/g, '/') : sourcePath;
     const dir = normalized.slice(0, normalized.lastIndexOf('/') + 1);
     const encoded = dir.split('/').map(encodeURIComponent).join('/');
-    if (isWindows && /^[a-z]:\//i.test(dir)) return 'file:///' + encoded.replace('%3A', ':');
-    return (isWindows && dir.startsWith('//') ? 'file:' : 'file://') + encoded;
+    if (windowsPath && /^[a-z]:\//i.test(dir)) return 'file:///' + encoded.replace('%3A', ':');
+    return (windowsPath && dir.startsWith('//') ? 'file:' : 'file://') + encoded;
   }
 
   function applyCanvasBase(doc, sourcePath, authoredBase) {

@@ -9,7 +9,8 @@ if (process.platform !== 'win32') {
   console.log('windows-port.e2e: skipped (Windows runtime required)');
   app.quit();
 } else {
-  const testDir = fs.mkdtempSync(path.join(os.tmpdir(), 'clay-windows-port-'));
+  // Main canonicalizes file paths, so expand 8.3 short temp paths (e.g. RUNNER~1) up front.
+  const testDir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'clay-windows-port-')));
   const assetDir = path.join(testDir, '中文 空格#%');
   fs.mkdirSync(assetDir);
   const sourcePath = path.join(assetDir, '页面 #100%.html');

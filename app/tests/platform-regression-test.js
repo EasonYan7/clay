@@ -123,6 +123,9 @@ async function run() {
   assert.strictEqual(fileDir('win32', 'C:/folder/source.html'), 'file:///C:/folder/');
   assert.strictEqual(fileDir('win32', '\\\\server\\share\\页面 #100%\\source.html'), 'file://server/share/' + encodeURIComponent('页面 #100%') + '/');
   assert.strictEqual(fileDir('win32', ''), '');
+  // Test harnesses without the preload still see Windows-shaped paths.
+  assert.strictEqual(fileDir('darwin', 'C:\\folder\\source.html'), 'file:///C:/folder/');
+  assert.strictEqual(fileDir('darwin', '\\\\server\\share\\source.html'), 'file://server/share/');
 
   const updater = createUpdater({
     currentVersion: '0.1.4', platform: 'win32', arch: 'x64', cacheDir: os.tmpdir(),

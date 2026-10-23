@@ -73,10 +73,11 @@ app.whenReady().then(async () => {
     process.exitCode = 1;
   } finally {
     try { win.destroy(); } catch (e) { /* already closed */ }
-    app.once('quit', () => {
-      if (!process.exitCode) fs.rmSync(testDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-      else process.stderr.write(`undo-canvas test data preserved at ${testDir}\n`);
-    });
-    app.quit();
+    // Exit explicitly: app.quit() returns 0 even when process.exitCode is set, and
+    // the quit event is unreliable once the last window is gone. Chromium may still
+    // hold profile files, so cleanup is best effort.
+    if (process.exitCode) process.stderr.write(`undo-canvas test data preserved at ${testDir}\n`);
+    else try { fs.rmSync(testDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); } catch (e) { /* left for the OS temp cleaner */ }
+    app.exit(process.exitCode || 0);
   }
 });
