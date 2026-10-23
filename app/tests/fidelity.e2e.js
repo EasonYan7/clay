@@ -166,7 +166,6 @@ app.whenReady().then(async () => {
     process.stderr.write('\n');
     process.exitCode = 1;
   } finally {
-    try { win.destroy(); } catch (e) { /* already closed */ }
     // Chromium may still flush profile files after the window is destroyed.
     // Clean only after Electron has emitted `quit`, otherwise the recursive
     // delete races the helper process and leaves flaky ENOENT/EBUSY failures.
@@ -174,6 +173,10 @@ app.whenReady().then(async () => {
       if (!process.exitCode) fs.rmSync(testDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
       else process.stderr.write(`fidelity test data preserved at ${testDir}\n`);
     });
+    // Register before destroying the last window, which starts quitting at once.
+    // app.quit() exits 0 regardless of process.exitCode, so pass failures on explicitly.
+    app.once('quit', () => app.exit(process.exitCode || 0));
+    try { win.destroy(); } catch (e) { /* already closed */ }
     app.quit();
   }
 });

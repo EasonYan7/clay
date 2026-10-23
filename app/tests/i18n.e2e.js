@@ -119,13 +119,16 @@ app.whenReady().then(async () => {
     process.stderr.write('\n');
     process.exitCode = 1;
   } finally {
-    win.destroy();
     // Wait for Electron's quit event before removing the profile.  The
     // renderer/helper process can still be flushing files after destroy().
     app.once('quit', () => {
       if (!process.exitCode) fs.rmSync(testDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
       else process.stderr.write(`i18n test data preserved at ${testDir}\n`);
     });
+    // Register before destroying the last window, which starts quitting at once.
+    // app.quit() exits 0 regardless of process.exitCode, so pass failures on explicitly.
+    app.once('quit', () => app.exit(process.exitCode || 0));
+    win.destroy();
     app.quit();
   }
 });

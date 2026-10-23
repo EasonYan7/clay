@@ -331,7 +331,6 @@ app.whenReady().then(async () => {
     process.stderr.write((err && err.stack) || String(err));
     process.stderr.write('\n');
   } finally {
-    if (!win.isDestroyed()) win.destroy();
     let finalized = false;
     const finalize = () => {
       if (finalized) return;
@@ -344,6 +343,10 @@ app.whenReady().then(async () => {
       if (failed) process.exitCode = 1;
     };
     app.once('quit', finalize);
+    // Register before destroying the last window, which starts quitting at once.
+    // app.quit() exits 0 regardless of process.exitCode, so pass failures on explicitly.
+    app.once('quit', () => app.exit(process.exitCode || 0));
+    if (!win.isDestroyed()) win.destroy();
     app.quit();
     // Some Electron test runners tear down without emitting `quit`; preserve
     // failure fixtures and return the right status in that case as well.
