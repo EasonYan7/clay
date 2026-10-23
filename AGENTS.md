@@ -12,6 +12,12 @@ Clay is a local-first macOS Electron app for visually editing HTML with GrapesJS
 - `docs/readme/` and `scripts/readme-assets/`: README media and generation scripts; `app/build/` contains packaging assets.
 - `.github/workflows/`: CI and release automation.
 
+## Windows Development
+
+- Keep platform differences behind `process.platform` and the existing preload platform bridge; preserve macOS behavior, native window controls, and imported-page color-scheme fidelity.
+- Run `npm run test:static` and `npm run test:platform` on any supported host. On Windows, also run `npm run test:windows`, `npm run test:windows-shell`, and `npm run test:windows-shell -- --force-device-scale-factor=1.5`.
+- Use isolated `CLAY_USERDATA` directories and an interactive desktop for GUI tests; run display sessions serially. The macOS DMG update UI suite does not validate Windows updates.
+
 ## Build, Test, and Development Commands
 
 Use Node.js 22.12+ and npm. Run these commands from `app/`:

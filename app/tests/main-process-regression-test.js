@@ -5,7 +5,8 @@ const os = require('os');
 const path = require('path');
 const { app, BrowserWindow } = require('electron');
 
-const testDir = fs.mkdtempSync(path.join(os.tmpdir(), 'clay-main-process-test-'));
+const testDir = process.env.CLAY_MAIN_PROCESS_TEST_DIR
+  || fs.mkdtempSync(path.join(os.tmpdir(), 'clay-main-process-test-'));
 const userData = path.join(testDir, 'user-data');
 const safePdf = path.join(testDir, 'safe.pdf');
 const remotePdf = path.join(testDir, 'remote.pdf');
@@ -297,6 +298,7 @@ app.whenReady().then(async () => {
         fixtureServer = null;
       }
       if (succeeded && !process.exitCode) {
+        if (process.env.CLAY_MAIN_PROCESS_TEST_DIR) return;
         try {
           fs.rmSync(testDir, { recursive: true, force: true });
         } catch (err) {

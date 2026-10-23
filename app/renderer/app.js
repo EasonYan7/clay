@@ -3,6 +3,8 @@
   const $ = (s) => document.querySelector(s);
   const $$ = (s) => [...document.querySelectorAll(s)];
   const t = (key, vars) => window.ClayI18n.t(key, vars);
+  const isWindows = window.clay && window.clay.platform === 'win32';
+  const pathSeparator = isWindows ? /[\\/]/ : '/';
 
   /* 取色器配置:交给底座内置的 spectrum。
    * 色板偏 Tailwind 常用值(AI 页面多用它),按"中性灰阶 / 红橙 / 绿青 / 蓝紫 / 粉玫"分行,
@@ -40,6 +42,8 @@
   let canvasTailwind = null;   // 当前画布是否带 Tailwind 运行时
   let docTailwind = false;     // 当前文档是否 Tailwind 页面
   let previewing = false;
+  let editorLoading = false;
+  let pdfExportPending = false;
   /* 导入/切换标签页时程序会批量改画布,撤销栈会收到一堆"变更"。
    * 那不是用户的操作:不能标脏、不能进历史。真人动手之前先把这门关上。 */
   let histSuppressed = false;
@@ -299,7 +303,7 @@
   function addRecent(path, name) {
     if (!path) return;   // 粘贴进来的没有源文件,不进最近记录
     recents = recents.filter((r) => r.path !== path);   // 去重
-    recents.unshift({ path, name: name || path.split('/').pop().replace(/\.html?$/i, '') });
+    recents.unshift({ path, name: name || path.split(pathSeparator).pop().replace(/\.html?$/i, '') });
     if (recents.length > RECENTS_MAX) recents.length = RECENTS_MAX;
   }
   function removeRecent(path) {
@@ -321,7 +325,7 @@
 
   // 只显示父级文件夹名,别把整条长路径糊上去
   function prettyDir(p) {
-    const parts = String(p).split('/').filter(Boolean);
+    const parts = String(p).split(pathSeparator).filter(Boolean);
     return parts.length >= 2 ? parts[parts.length - 2] : '';
   }
 
@@ -373,7 +377,7 @@
         '<span class="rc-path"></span>' +
         '<span class="rc-remove" title="' + t('recent.remove') + '">' + window.icon('close', 11) + '</span>';
       const nameEl = c.querySelector('.rc-name');
-      nameEl.textContent = r.name || r.path.split('/').pop();
+      nameEl.textContent = r.name || r.path.split(pathSeparator).pop();
       nameEl.title = nameEl.textContent;   // 截断后仍能悬停看到完整文件名
       c.querySelector('.rc-path').textContent = prettyDir(r.path) || t('recent.local');
       c.onclick = (e) => {
@@ -601,6 +605,21 @@
     });
   }
 
+  async function loadWindowsEditor() {
+    editorLoading = true;
+    updateWindowsChrome();
+    try {
+      await window.ClayEditorRuntime.load();
+      return true;
+    } catch (error) {
+      toast(t('window.loadFailed', { error: error.message || t('common.unknownError') }));
+      return false;
+    } finally {
+      editorLoading = false;
+      updateWindowsChrome();
+    }
+  }
+
   function ensureEditor(tailwind) {
     if (editor && canvasTailwind === tailwind) return editor;
     if (editor) {
@@ -647,8 +666,11 @@
    * 同样的方式解析。没有源文件(粘贴导入)时清空,不装错的。 */
   function fileDirHref(sourcePath) {
     if (!sourcePath) return '';
-    const dir = sourcePath.slice(0, sourcePath.lastIndexOf('/') + 1);
-    return 'file://' + dir.split('/').map(encodeURIComponent).join('/');
+    const normalized = isWindows ? sourcePath.replace(/\\/g, '/') : sourcePath;
+    const dir = normalized.slice(0, normalized.lastIndexOf('/') + 1);
+    const encoded = dir.split('/').map(encodeURIComponent).join('/');
+    if (isWindows && /^[a-z]:\//i.test(dir)) return 'file:///' + encoded.replace('%3A', ':');
+    return (isWindows && dir.startsWith('//') ? 'file:' : 'file://') + encoded;
   }
 
   function applyCanvasBase(doc, sourcePath, authoredBase) {
@@ -1521,6 +1543,42 @@
     if (d) d.data = editor.getProjectData();
   }
 
+  function updateWindowsChrome() {
+    if (!isWindows) return;
+    const active = docs.find((doc) => doc.id === activeDocId);
+    const title = active ? active.name : t('window.home');
+    const label = $('#window-document');
+    label.textContent = title;
+    label.title = title;
+    const status = $('#window-status');
+    status.textContent = t(pdfExportPending ? 'status.pdfGenerating' : editorLoading ? 'window.loading'
+      : !active ? 'window.local' : active.dirty ? 'window.unsaved' : active.sourcePath ? 'window.saved' : 'window.draft');
+    status.dataset.dirty = String(!!(active && active.dirty));
+    document.title = active ? (active.dirty ? '● ' : '') + active.name + ' — Clay' : 'Clay';
+    const available = !!(active && editor);
+    $$('#device-seg button, #btn-undo, #btn-redo, #btn-preview, #btn-save').forEach((button) => { button.disabled = !available; });
+    const pdfButton = $('#btn-export-pdf');
+    pdfButton.disabled = !available || pdfExportPending;
+    pdfButton.setAttribute('aria-busy', String(pdfExportPending));
+  }
+
+  function wireWindowsChrome() {
+    if (!isWindows) return;
+    const menuButton = $('#btn-app-menu');
+    menuButton.onclick = async () => {
+      if (menuButton.getAttribute('aria-expanded') === 'true') return;
+      const bounds = menuButton.getBoundingClientRect();
+      menuButton.setAttribute('aria-expanded', 'true');
+      try { await window.clay.showAppMenu({ x: bounds.left, y: bounds.bottom + 4 }); }
+      finally { menuButton.setAttribute('aria-expanded', 'false'); }
+    };
+    window.clay.onActivateMenu(() => menuButton.click());
+    window.clay.onWindowFullscreen((fullscreen) => {
+      document.documentElement.classList.toggle('window-fullscreen', fullscreen);
+    });
+    updateWindowsChrome();
+  }
+
   function renderTabs() {
     const list = $('#tabs-list');
     list.innerHTML = '';
@@ -1547,6 +1605,7 @@
     const act = docs.find((x) => x.id === activeDocId);
     const sd = $('#save-dot');
     if (sd) sd.hidden = !(act && act.dirty);
+    updateWindowsChrome();
   }
 
   /* 脏标记 = 「有没保存到文件里的修改」,和 Word 的语义一致。
@@ -1657,6 +1716,7 @@
   function applyTheme(light) {
     const btn = $('#btn-theme');
     document.body.classList.toggle('light', light);
+    if (isWindows && window.clay.setWindowTheme) window.clay.setWindowTheme(light ? 'light' : 'dark');
     if (btn) {
       btn.innerHTML = window.icon(light ? 'moon' : 'sun');
       btn.title = t(light ? 'theme.toDark' : 'theme.toLight');
@@ -1775,7 +1835,7 @@
       label.setAttribute('class', 'sk-label');
       label.setAttribute('x', lx);
       label.setAttribute('y', ly);
-      label.setAttribute('text-anchor', 'middle');
+      label.setAttribute('text-anchor', isWindows && note.sel === '#btn-home' ? 'start' : 'middle');
       label.setAttribute('transform', 'rotate(' + jitter(i * 5, 1.8).toFixed(2) + ' ' + lx + ' ' + ly + ')');
       label.textContent = note.text;
       svg.appendChild(label);
@@ -1813,6 +1873,9 @@
     snapshotActive();
     const d = docs.find((x) => x.id === id);
     if (!d) return false;
+    if (isWindows && !window.grapesjs) {
+      if (!await loadWindowsEditor() || version !== navigationVersion) return false;
+    }
     activeDocId = id;
     docTailwind = d.isTailwind;
     const ed = ensureEditor(d.isTailwind);
@@ -1883,7 +1946,7 @@
         type: 'question',
         message: t(hasSrc ? 'dialog.closeDirty' : 'dialog.closeUnsaved', { name: d.name }),
         detail: hasSrc
-          ? t('dialog.closeSaveDetail', { file: d.sourcePath.split('/').pop() })
+          ? t('dialog.closeSaveDetail', { file: d.sourcePath.split(pathSeparator).pop() })
           : t('dialog.closeDiscardDetail'),
         buttons: [hasSrc ? t('common.save') : t('dialog.saveFile'), t('dialog.discard'), t('common.cancel')],
         defaultId: 0,
@@ -1998,7 +2061,7 @@
       setDevice(device);
       syncThemeToPage(ed, d);
       persist();
-      toast(t('status.externalReloaded', { file: d.sourcePath.split('/').pop() }));
+      toast(t('status.externalReloaded', { file: d.sourcePath.split(pathSeparator).pop() }));
       return true;
     } catch (err) {
       histSuppressed = false;
@@ -2305,6 +2368,9 @@
       if (version !== navigationVersion) return false;
     }
 
+    if (isWindows && !window.grapesjs) {
+      if (!await loadWindowsEditor() || version !== navigationVersion) return false;
+    }
     snapshotActive();
     const tw = window.ClayImporter.detectTailwind(raw);
     const ed = ensureEditor(tw);
@@ -2422,7 +2488,7 @@
     renderTabs();
     persist();
     syncSourceWatch();   // 文件若曾被删除,本次保存重建后要重新接上目录监听
-    toast(t('status.savedTo', { file: d.sourcePath.split('/').pop() }));
+    toast(t('status.savedTo', { file: d.sourcePath.split(pathSeparator).pop() }));
     return true;
   }
 
@@ -2441,7 +2507,7 @@
     try { result = window.ClayExporter.build(token.ed, d); }
     catch (err) { toast(t('status.saveFailed', { error: err.message || t('common.unknownError') })); return false; }
     const base = (d.sourcePath
-      ? d.sourcePath.split('/').pop().replace(/\.html?$/i, '')
+      ? d.sourcePath.split(pathSeparator).pop().replace(/\.html?$/i, '')
       : (d.name || 'page'))
       .replace(/[\/\\:*?"<>|]/g, '-').replace(/(-clay)+$/i, '').slice(0, 40);
     const fname = base + '-clay.html';
@@ -2454,7 +2520,7 @@
       if (!p) return false;   // 用户取消了保存框
       d.sourcePath = p;
       d.sourceKey = 'file:' + p;
-      d.name = p.split('/').pop().replace(/\.html?$/i, '');
+      d.name = p.split(pathSeparator).pop().replace(/\.html?$/i, '');
       d.sourceHash = hashOf(result.code);
       d.dirty = false;
       delete d.externalConflict;
@@ -2466,7 +2532,7 @@
       renderTabs();
       persist();
       syncSourceWatch();
-      toast(t('status.savedAs', { file: p.split('/').pop() }));
+      toast(t('status.savedAs', { file: p.split(pathSeparator).pop() }));
       return true;
     }
     const blob = new Blob([result.code], { type: 'text/html' });
@@ -2521,6 +2587,18 @@
   }
 
   async function exportPdf() {
+    if (!isWindows) return exportPdfNow();
+    if (pdfExportPending) return false;
+    pdfExportPending = true;
+    updateWindowsChrome();
+    try { return await exportPdfNow(); }
+    finally {
+      pdfExportPending = false;
+      updateWindowsChrome();
+    }
+  }
+
+  async function exportPdfNow() {
     if (!await waitWorkspaceReady(true)) return false;
     const token = { id: activeDocId, ed: editor, nav: navigationVersion };
     await reconcileBeforeBoundary();
@@ -2549,7 +2627,7 @@
     if (token.id !== activeDocId || token.ed !== editor || token.nav !== navigationVersion) return false;
     if (!r) return false;                                   // 用户取消了保存框
     if (!r.ok) { toast(t('status.pdfFailed', { error: r.error || t('common.unknownError') })); return false; }
-    toast(t('status.pdfDone', { file: r.path.split('/').pop() }));
+    toast(t('status.pdfDone', { file: r.path.split(pathSeparator).pop() }));
     return true;
   }
 
@@ -3030,6 +3108,7 @@
   /* ── 事件接线 ────────────────────────────── */
   function wireUI() {
     paintIcons();
+    wireWindowsChrome();
     $('#btn-home').onclick = goHome;
     // 主场景:本地已有文件 → 直接开系统文件框,不再多一层弹窗
     $('#btn-newtab').onclick = openFilePicker;

@@ -1,6 +1,19 @@
 const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 contextBridge.exposeInMainWorld('clay', {
+  platform: process.platform,
+  setWindowTheme: (theme) => ipcRenderer.send('clay:window-theme', theme),
+  showAppMenu: (point) => ipcRenderer.invoke('clay:app-menu', point),
+  onActivateMenu: (cb) => {
+    const handler = () => cb();
+    ipcRenderer.on('clay:activate-menu', handler);
+    return () => ipcRenderer.removeListener('clay:activate-menu', handler);
+  },
+  onWindowFullscreen: (cb) => {
+    const handler = (_event, fullscreen) => cb(fullscreen);
+    ipcRenderer.on('clay:window-fullscreen', handler);
+    return () => ipcRenderer.removeListener('clay:window-fullscreen', handler);
+  },
   getUpdateState: () => ipcRenderer.invoke('clay:update-state'),
   checkForUpdates: () => ipcRenderer.invoke('clay:check-updates'),
   onUpdateState: (cb) => {

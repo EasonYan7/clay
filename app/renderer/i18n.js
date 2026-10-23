@@ -4,8 +4,14 @@
 (function () {
   const STORAGE_KEY = 'clay-locale';
   const DEFAULT_LOCALE = 'zh-CN';
+  const isWindows = window.clay && window.clay.platform === 'win32';
+  document.documentElement.dataset.platform = (window.clay && window.clay.platform) || '';
   const MESSAGES = {
     'zh-CN': {
+      'window.menu': '应用菜单 · Alt',
+      'window.home': 'HTML 视觉工作台', 'window.local': '本地优先',
+      'window.saved': '已保存', 'window.unsaved': '未保存', 'window.draft': '未存为文件',
+      'window.loading': '载入编辑器…', 'window.loadFailed': '编辑器加载失败，请重试：{error}',
       'svg.title': '矢量图编辑',
       'svg.hint': '点击形状，双击文字。文字在下方修改。',
       'svg.content': '文字内容', 'svg.fill': '填充', 'svg.stroke': '描边', 'svg.none': '无',
@@ -29,6 +35,7 @@
       'common.save': '保存',
       'common.unknownError': '未知错误',
       'toolbar.home': '返回主页',
+      'shortcut.open': '⌘O',
       'toolbar.desktop': '桌面',
       'toolbar.tablet': '平板',
       'toolbar.mobile': '手机',
@@ -193,6 +200,10 @@
       'locale.label': '界面语言',
     },
     'en-US': {
+      'window.menu': 'Application menu · Alt',
+      'window.home': 'Visual HTML workspace', 'window.local': 'Local-first',
+      'window.saved': 'Saved', 'window.unsaved': 'Unsaved', 'window.draft': 'Draft',
+      'window.loading': 'Loading editor…', 'window.loadFailed': 'Could not load the editor. Try again: {error}',
       'svg.title': 'Vector Editing',
       'svg.hint': 'Click a shape or double-click text. Edit the text below.',
       'svg.content': 'Text', 'svg.fill': 'Fill', 'svg.stroke': 'Stroke', 'svg.none': 'None',
@@ -216,6 +227,7 @@
       'common.save': 'Save',
       'common.unknownError': 'Unknown error',
       'toolbar.home': 'Back to Home',
+      'shortcut.open': '⌘O',
       'toolbar.desktop': 'Desktop',
       'toolbar.tablet': 'Tablet',
       'toolbar.mobile': 'Mobile',
@@ -375,6 +387,7 @@
   function t(key, vars) {
     const table = MESSAGES[locale] || MESSAGES[DEFAULT_LOCALE];
     let value = table[key] || MESSAGES[DEFAULT_LOCALE][key] || key;
+    if (isWindows) value = value.replace(/⇧⌘/g, 'Ctrl+Shift+').replace(/⌘/g, 'Ctrl+');
     Object.keys(vars || {}).forEach((name) => {
       value = value.replace(new RegExp('\\{' + name + '\\}', 'g'), String(vars[name]));
     });
