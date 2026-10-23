@@ -9,6 +9,7 @@
 <p align="center">
   <a href="https://github.com/EasonYan7/clay/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/EasonYan7/clay?style=flat-square&label=release&color=7c5cff&labelColor=18181b" /></a>
   <img alt="macOS 12+" src="https://img.shields.io/badge/macOS-12%2B-18181b?style=flat-square&logo=apple&logoColor=white" />
+  <img alt="Windows experimental" src="https://img.shields.io/badge/Windows-experimental-18181b?style=flat-square" />
   <img alt="Local-first" src="https://img.shields.io/badge/local--first-no%20account-18181b?style=flat-square" />
   <a href="./LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/license-MIT-18181b?style=flat-square" /></a>
 </p>
@@ -110,7 +111,8 @@ Installed builds also contact GitHub for version checks. Update checks do not se
 | Local HTML files · pasted source | ✅ Supported |
 | HTML · PDF export | ✅ Supported |
 | Import from a URL | ⏳ Not yet |
-| Windows · Linux | ⏳ Not yet adapted or verified |
+| Windows x64 | 🧪 Experimental · build from source |
+| Linux | ⏳ Not yet adapted or verified |
 | Signed and notarized builds | ⏳ Not yet |
 
 ## FAQ
@@ -136,7 +138,7 @@ For safety and predictability, the canvas does not run arbitrary page scripts. C
 <details>
 <summary><b>Can I use Clay on Windows or Linux?</b></summary>
 <br />
-Not yet. Clay is developed and tested on macOS. Its foundation is cross-platform, but Windows and Linux still need packaging, adaptation, and regression testing.
+Windows x64 support is experimental. Build it from source with `npm run dist:win` to get an unsigned ZIP; there is no installer, file association, or in-app update yet, and Windows may show a SmartScreen warning. Linux is not yet adapted or tested.
 </details>
 
 ## Development
@@ -150,6 +152,7 @@ npm install
 npm start          # run the app
 npm test           # static checks + the full Electron suite
 npm run dist       # build Clay-<version>-arm64.dmg and -x64.dmg into app/dist/
+npm run dist:win   # experimental: build an unsigned Windows x64 ZIP into app/dist/
 ```
 
 <details>
@@ -167,8 +170,10 @@ npm run dist       # build Clay-<version>-arm64.dmg and -x64.dmg into app/dist/
 | `npm run test:updater` | Version ordering, release assets, download verification, failures, and retries |
 | `npm run test:updates-ui` | Real preload/menu/toolbar update flow, bilingual layouts, and installer handoff with fixture downloads |
 | `npm run test:svg` | Vector selection, text, color, geometry, group movement, undo/redo, legacy workspaces, and export/reopen |
+| `npm run test:platform` | macOS and Windows menus, shortcuts, file paths, window options, and on-demand editor loading |
+| `npm run test:windows` · `test:windows-shell` | Windows only: title bar, menus, window state, themes, scaling, and PDF export |
 
-CI runs the GUI suites on macOS and a behavioral subset under Xvfb on Linux. Pushing a `v*` tag builds both DMGs, publishes a GitHub Release, and updates the [Homebrew tap](https://github.com/EasonYan7/homebrew-clay).
+CI runs the GUI suites on macOS, a behavioral subset under Xvfb on Linux, and the Windows shell suites plus that subset on Windows. Pushing a `v*` tag builds both DMGs, publishes a GitHub Release, and updates the [Homebrew tap](https://github.com/EasonYan7/homebrew-clay).
 
 </details>
 
@@ -200,14 +205,19 @@ scripts/
 
 Clay is early, so real pages and clear reproduction steps help the most. [Open an issue](https://github.com/EasonYan7/clay/issues) for HTML that doesn't import or export correctly, differences between the browser and the canvas, problems with drag and drop, history, saving, or file sync, and ideas for Windows and Linux or new translations.
 
-Please include your macOS version, steps to reproduce, and expected versus actual behavior. Remove anything sensitive before sharing internal pages.
+Please include your operating system and version, steps to reproduce, and expected versus actual behavior. Remove anything sensitive before sharing internal pages.
 
 ## Roadmap
 
 - Signed and notarized macOS builds
 - Broader fidelity for complex CSS, Tailwind configurations, and dynamic pages
-- Windows and Linux support
+- Windows installers and updates
+- Linux support
 - A fuller contribution guide
+
+## Contributors
+
+<a href="https://github.com/pissyc-pixel"><img src="https://avatars.githubusercontent.com/u/265718717?v=4&s=128" width="64" height="64" alt="" /><br /><sub><b>pissyc-pixel</b></sub></a>
 
 ## License
 

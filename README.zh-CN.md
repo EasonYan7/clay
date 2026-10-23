@@ -9,6 +9,7 @@
 <p align="center">
   <a href="https://github.com/EasonYan7/clay/releases/latest"><img alt="最新版本" src="https://img.shields.io/github/v/release/EasonYan7/clay?style=flat-square&label=release&color=7c5cff&labelColor=18181b" /></a>
   <img alt="macOS 12+" src="https://img.shields.io/badge/macOS-12%2B-18181b?style=flat-square&logo=apple&logoColor=white" />
+  <img alt="Windows 实验性支持" src="https://img.shields.io/badge/Windows-实验性-18181b?style=flat-square" />
   <img alt="本地优先" src="https://img.shields.io/badge/本地优先-无需账号-18181b?style=flat-square" />
   <a href="./LICENSE"><img alt="MIT 许可证" src="https://img.shields.io/badge/license-MIT-18181b?style=flat-square" /></a>
 </p>
@@ -110,7 +111,8 @@ xattr -dr com.apple.quarantine /Applications/Clay.app
 | 本地 HTML 文件 · 粘贴代码 | ✅ 支持 |
 | 导出 HTML · PDF | ✅ 支持 |
 | 通过 URL 导入 | ⏳ 暂不支持 |
-| Windows · Linux | ⏳ 尚未适配与验证 |
+| Windows x64 | 🧪 实验性支持 · 需从源码构建 |
+| Linux | ⏳ 尚未适配与验证 |
 | 签名与公证安装包 | ⏳ 暂未提供 |
 
 ## 常见问题
@@ -136,7 +138,7 @@ xattr -dr com.apple.quarantine /Applications/Clay.app
 <details>
 <summary><b>可以在 Windows 或 Linux 上使用吗？</b></summary>
 <br />
-暂时不行。Clay 目前只在 macOS 上开发和测试。底层技术支持跨平台，但 Windows 与 Linux 仍需要打包、适配和回归测试。
+Windows x64 为实验性支持：可从源码运行 `npm run dist:win`，得到未签名的 ZIP。目前没有安装包、文件关联和应用内更新，首次运行可能出现 SmartScreen 提示。Linux 尚未适配和测试。
 </details>
 
 ## 开发
@@ -150,6 +152,7 @@ npm install
 npm start          # 运行应用
 npm test           # 静态检查 + 完整 Electron 测试
 npm run dist       # 在 app/dist/ 生成 Clay-<version>-arm64.dmg 与 -x64.dmg
+npm run dist:win   # 实验性：在 app/dist/ 生成未签名的 Windows x64 ZIP
 ```
 
 <details>
@@ -167,8 +170,10 @@ npm run dist       # 在 app/dist/ 生成 Clay-<version>-arm64.dmg 与 -x64.dmg
 | `npm run test:updater` | 版本比较、发布包匹配、下载校验、失败与重试 |
 | `npm run test:updates-ui` | 使用下载样例验证真实桥接、菜单与按钮、中英文布局和安装包交接 |
 | `npm run test:svg` | 矢量选择、文字、颜色、尺寸、整组移动、撤销重做、旧工作区及导出重开 |
+| `npm run test:platform` | macOS 与 Windows 的菜单、快捷键、文件路径、窗口参数及编辑器按需加载 |
+| `npm run test:windows` · `test:windows-shell` | 仅限 Windows：标题栏、菜单、窗口状态、主题、缩放及 PDF 导出 |
 
-CI 会在 macOS 上运行 GUI 测试，并在 Linux/Xvfb 下运行行为检查子集。推送 `v*` tag 会自动构建两个 DMG、发布 GitHub Release，并更新 [Homebrew tap](https://github.com/EasonYan7/homebrew-clay)。
+CI 会在 macOS 上运行 GUI 测试，在 Linux/Xvfb 下运行行为检查子集，并在 Windows 上运行窗口外壳测试和同一子集。推送 `v*` tag 会自动构建两个 DMG、发布 GitHub Release，并更新 [Homebrew tap](https://github.com/EasonYan7/homebrew-clay)。
 
 </details>
 
@@ -200,14 +205,19 @@ scripts/
 
 Clay 仍在早期，真实页面和清晰的复现步骤最有帮助。欢迎 [提交 Issue](https://github.com/EasonYan7/clay/issues)：无法正确导入或导出的 HTML、画布与浏览器显示不一致、拖拽、历史、保存或文件同步问题，以及 Windows / Linux 适配和新语言翻译的建议。
 
-请附上 macOS 版本、复现步骤，以及预期与实际结果。涉及内部页面时，请先删除敏感信息。
+请附上操作系统及版本、复现步骤，以及预期与实际结果。涉及内部页面时，请先删除敏感信息。
 
 ## 路线图
 
 - 签名并公证的 macOS 安装包
 - 扩大复杂 CSS、Tailwind 配置与动态页面的保真覆盖
-- Windows 与 Linux 支持
+- Windows 安装包与更新
+- Linux 支持
 - 更完整的贡献指南
+
+## 贡献者
+
+<a href="https://github.com/pissyc-pixel"><img src="https://avatars.githubusercontent.com/u/265718717?v=4&s=128" width="64" height="64" alt="" /><br /><sub><b>pissyc-pixel</b></sub></a>
 
 ## 许可证
 
