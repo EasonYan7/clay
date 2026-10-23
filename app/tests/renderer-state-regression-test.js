@@ -331,25 +331,14 @@ app.whenReady().then(async () => {
     process.stderr.write((err && err.stack) || String(err));
     process.stderr.write('\n');
   } finally {
-    let finalized = false;
-    const finalize = () => {
-      if (finalized) return;
-      finalized = true;
-      if (succeeded && !failed) {
-        fs.rmSync(testDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
-      } else {
-        process.stderr.write('renderer-state-regression preserved fixtures at ' + testDir + '\n');
-      }
-      if (failed) process.exitCode = 1;
-    };
-    app.once('quit', finalize);
-    // Register before destroying the last window, which starts quitting at once.
-    // app.quit() exits 0 regardless of process.exitCode, so pass failures on explicitly.
-    app.once('quit', () => app.exit(process.exitCode || 0));
     if (!win.isDestroyed()) win.destroy();
-    app.quit();
-    // Some Electron test runners tear down without emitting `quit`; preserve
-    // failure fixtures and return the right status in that case as well.
-    setTimeout(finalize, 1000);
+    // Exit explicitly: app.quit() returns 0 even when process.exitCode is set, and
+    // the quit event is unreliable once the last window is gone.
+    if (succeeded && !failed) {
+      try { fs.rmSync(testDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 }); } catch (e) { /* left for the OS temp cleaner */ }
+    } else {
+      process.stderr.write('renderer-state-regression preserved fixtures at ' + testDir + '\n');
+    }
+    app.exit(succeeded && !failed ? 0 : 1);
   }
 });
