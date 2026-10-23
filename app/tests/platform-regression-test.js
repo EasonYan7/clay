@@ -95,11 +95,13 @@ async function run() {
   assert.strictEqual(JSON.stringify(windows.menu.map((item) => item.label)), JSON.stringify(['File', 'Edit', 'View', 'Help']));
   assert(mac.menu[0].submenu.some((item) => item.role === 'hide'));
   assert.strictEqual(mac.menu[0].submenu[0].role, 'about');
+  assert(mac.menu[0].submenu.some((item) => item.id === 'clay-check-updates'));
   assert(!windows.menu.some((item) => item.submenu.some((child) => child.role === 'hide')));
   assert(windows.menu[0].submenu.some((item) => item.role === 'quit' && item.label === 'Exit'));
   assert(windows.menu[0].submenu.some((item) => item.role === 'close'));
   assert(windows.menu[3].submenu.some((item) => item.role === 'about'));
-  assert(windows.menu[3].submenu.some((item) => item.id === 'clay-check-updates'));
+  assert.strictEqual(windows.menu[3].submenu.length, 1);
+  assert(!windows.menu.some((item) => item.submenu.some((child) => child.id === 'clay-check-updates')));
   assert.strictEqual(windows.menu[1].submenu.find((item) => item.role === 'redo').accelerator, 'Ctrl+Shift+Z');
   assert.strictEqual(mac.menu[2].submenu.find((item) => item.role === 'redo').accelerator, undefined);
 

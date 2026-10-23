@@ -25,6 +25,8 @@ jobs:
         run: npm ci --prefix app
       - name: Run static checks
         run: npm run test:static --prefix app
+      - name: Run platform regressions
+        run: npm run test:platform --prefix app
       - name: Run update service regressions
         run: npm run test:updater --prefix app
       - name: Reject high or critical advisories

@@ -96,6 +96,8 @@ if (process.platform !== 'win32') {
       assert.strictEqual(bounds.fits, true, JSON.stringify(bounds));
       assert(bounds.inset >= 100);
       assert.deepStrictEqual(Menu.getApplicationMenu().items.map((item) => item.label), ['文件', '编辑', '视图', '帮助']);
+      assert(!Menu.getApplicationMenu().getMenuItemById('clay-check-updates'));
+      assert.strictEqual(await evaluate('document.querySelector("#btn-update").hidden'), true);
       assert.strictEqual(aboutOptions.applicationName, 'Clay');
       assert.strictEqual(aboutOptions.applicationVersion, app.getVersion());
       assert.strictEqual(appId, 'com.clay.editor');

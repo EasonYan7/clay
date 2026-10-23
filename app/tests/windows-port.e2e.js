@@ -89,6 +89,8 @@ if (process.platform !== 'win32') {
       assert.strictEqual(menu.items.length, 4);
       assert(menu.items[0].submenu.items.some((item) => item.role === 'quit'));
       assert(menu.items[3].submenu.items.some((item) => item.role === 'about'));
+      assert(!menu.getMenuItemById('clay-check-updates'));
+      assert.strictEqual(await evaluate(window, 'document.querySelector("#btn-update").hidden'), true);
       report.checks.push({ locale, ui, menu: menu.items.map((item) => item.label) });
     }
     const update = await evaluate(window, 'window.clay.checkForUpdates()');

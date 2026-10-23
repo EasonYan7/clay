@@ -12,12 +12,11 @@ Clay is a local-first macOS Electron app for visually editing HTML with GrapesJS
 - `docs/readme/` and `scripts/readme-assets/`: README media and generation scripts; `app/build/` contains packaging assets.
 - `.github/workflows/`: CI and release automation.
 
-## Windows Mainline
+## Windows Development
 
-- Windows development now targets A (`C:\dev\clay-a`, branch `win-port-a`). B is historical reference, not a second delivery target; do not modify, launch, or delete it during A work.
-- Keep macOS behavior and bundled vendor files intact. Windows shell differences use `process.platform` and the existing preload platform bridge; retain native window controls and imported-page color-scheme fidelity.
-- Run `npm run test:platform`, `npm run test:windows`, and `npm run test:windows-shell` for Windows changes, including 150% scale. Use isolated `CLAY_USERDATA` and run desktop sessions serially.
-- Launch the verified Windows build with `START-WINDOWS.cmd`. See `WINDOWS-PORT.md` for evidence, limitations, packaging, and cleanup rules. Never claim the macOS-only update UI suite passes on Windows.
+- Keep platform differences behind `process.platform` and the existing preload platform bridge; preserve macOS behavior, native window controls, and imported-page color-scheme fidelity.
+- Run `npm run test:static` and `npm run test:platform` on any supported host. On Windows, also run `npm run test:windows`, `npm run test:windows-shell`, and `npm run test:windows-shell -- --force-device-scale-factor=1.5`.
+- Use isolated `CLAY_USERDATA` directories and an interactive desktop for GUI tests; run display sessions serially. The macOS DMG update UI suite does not validate Windows updates.
 
 ## Build, Test, and Development Commands
 

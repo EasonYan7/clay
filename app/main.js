@@ -786,8 +786,6 @@ function buildMenu() {
       ],
     },
     ...(isWindows ? [{ label: mt('help'), submenu: [
-      { id: 'clay-check-updates', label: mt('checkUpdates'), click: () => { void showUpdates(); } },
-      { type: 'separator' },
       { role: 'about', label: mt('about') },
     ] }] : [{ label: mt('window'), submenu: [{ role: 'minimize', label: mt('minimize') }, { role: 'close', label: mt('close') }] }]),
   ];
