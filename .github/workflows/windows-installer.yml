@@ -1,0 +1,76 @@
+name: Clay Windows Installer
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - codex/windows-installer
+    paths:
+      - .github/workflows/windows-installer.yml
+      - app/**
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.12.0
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: Run static and platform checks
+        run: |
+          npm run test:static
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          npm run test:platform
+      - name: Build Windows x64 installer
+        run: npm exec -- electron-builder --win nsis --x64 --publish never '-c.nsis.artifactName=${productName}-${version}-win-${arch}-setup.${ext}'
+      - name: Verify installation and write checksum
+        run: |
+          $version = node -p 'require("./package.json").version'
+          $name = "Clay-$version-win-x64-setup.exe"
+          $installer = Get-Item "dist/$name"
+          $destination = Join-Path $env:RUNNER_TEMP 'Clay installer smoke test'
+
+          # NSIS requires /D to be the final argument, with an unquoted path.
+          $setup = Start-Process -FilePath $installer.FullName -ArgumentList "/S /D=$destination" -Wait -PassThru
+          if ($setup.ExitCode -ne 0) { throw "Installer exited with code $($setup.ExitCode)" }
+          foreach ($file in 'Clay.exe', 'resources/app.asar', 'Uninstall Clay.exe') {
+            if (!(Test-Path (Join-Path $destination $file) -PathType Leaf)) {
+              throw "Installed file missing: $file"
+            }
+          }
+
+          $env:CLAY_USERDATA = Join-Path $env:RUNNER_TEMP 'clay-installer-userdata'
+          $clay = Start-Process -FilePath (Join-Path $destination 'Clay.exe') -PassThru
+          try {
+            if ($clay.WaitForExit(5000)) { throw "Clay exited immediately with code $($clay.ExitCode)" }
+          } finally {
+            if (!$clay.HasExited) { Stop-Process -Id $clay.Id }
+          }
+
+          $hash = (Get-FileHash -Algorithm SHA256 $installer.FullName).Hash.ToLowerInvariant()
+          "$hash  $name" | Set-Content -Encoding ascii 'dist/SHA256SUMS-Windows.txt'
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: clay-windows-x64
+          path: |
+            app/dist/Clay-*-win-x64-setup.exe
+            app/dist/SHA256SUMS-Windows.txt
+          if-no-files-found: error
+          compression-level: 0
