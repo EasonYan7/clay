@@ -38,10 +38,11 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           npm run test:platform
       - name: Build Windows x64 installer
-        run: npm exec -- electron-builder --win nsis --x64 --publish never '-c.nsis.artifactName=${productName}-${version}-win-${arch}-setup.${ext}'
+        run: >-
+          & './node_modules/.bin/electron-builder.cmd' --win nsis --x64 --publish never '-c.nsis.artifactName=${productName}-${version}-win-${arch}-setup.${ext}'
       - name: Verify installation and write checksum
         run: |
-          $version = node -p 'require("./package.json").version'
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
           $name = "Clay-$version-win-x64-setup.exe"
           $installer = Get-Item "dist/$name"
           $destination = Join-Path $env:RUNNER_TEMP 'Clay installer smoke test'
